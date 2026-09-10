@@ -289,7 +289,7 @@ Layanan Bantuan WhatsApp: 0811-8777-078
             
             {/* Main Video View: Psychologist Stream */}
             <img
-              src={psychologist?.avatar || '/src/assets/psychologist_cliff_tedyanto.jpg'}
+              src={psychologist?.avatar || '/assets/psychologist_cliff_tedyanto.jpg'}
               alt={psychologist?.name || 'Psikolog'}
               className="w-full h-full object-cover object-top opacity-95 group-hover:scale-102 transition-transform duration-700"
             />

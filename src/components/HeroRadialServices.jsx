@@ -187,7 +187,7 @@ export default function HeroRadialServices({ onStartJourney }) {
                 
                 {/* Circular Logo Image */}
                 <img 
-                  src="/src/assets/logo_ruang_jiwa.png" 
+                  src="/assets/logo_ruang_jiwa.png" 
                   alt="Logo Ruang Jiwa Harmoni" 
                   className="w-full h-full object-contain drop-shadow-sm group-hover:scale-105 transition-transform duration-300"
                 />

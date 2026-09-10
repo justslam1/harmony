@@ -21,7 +21,7 @@ export default function ClientDashboard({ currentUser, onNavigate, onEnterConsul
       id: 'SES-88219',
       psychologistName: 'Cliff Tedyanto, M.Psi., Psikolog',
       psychologistTitle: 'Psikolog Klinis Dewasa',
-      avatar: '/src/assets/psychologist_cliff_tedyanto.jpg',
+      avatar: '/assets/psychologist_cliff_tedyanto.jpg',
       date: 'Rabu, 02 Sept 2026',
       time: '14.00 – 15.00 WIB',
       format: 'Video Call Online (60 Menit)',
@@ -250,7 +250,7 @@ export default function ClientDashboard({ currentUser, onNavigate, onEnterConsul
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
               <div className="flex items-center gap-4">
                 <img
-                  src="/src/assets/psychologist_cliff_tedyanto.jpg"
+                  src="/assets/psychologist_cliff_tedyanto.jpg"
                   alt="Cliff Tedyanto"
                   className="w-16 h-16 rounded-2xl object-cover border border-slate-200 shadow-sm"
                 />

@@ -12,7 +12,7 @@ export default function Footer({ onOpenAdmin, onOpenPsychologistPortal, onOpenFi
           <div className="lg:col-span-8 space-y-3">
             <div className="flex items-center gap-2.5 mb-1">
               <img 
-                src="/src/assets/logo_ruang_jiwa.png" 
+                src="/assets/logo_ruang_jiwa.png" 
                 alt="Logo Ruang Jiwa" 
                 className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-xs" 
               />

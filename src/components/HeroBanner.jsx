@@ -6,7 +6,7 @@ export default function HeroBanner({ onStartAssessment, onViewPsychologists }) {
       
       {/* Background Image: Indonesian Counseling Session */}
       <img 
-        src="/src/assets/indonesian_counseling_hero.jpg" 
+        src="/assets/indonesian_counseling_hero.jpg" 
         alt="Sesi Konseling Psikologi Indonesia Ceria dan Hangat" 
         className="absolute inset-0 w-full h-full object-cover object-center sm:object-right"
       />

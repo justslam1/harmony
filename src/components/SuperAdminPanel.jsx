@@ -142,7 +142,7 @@ export default function SuperAdminPanel({ onBackToWebsite }) {
       name: psy.name || '',
       title: psy.title || '',
       sipp: psy.sipp || 'SIPP-112233-2024',
-      avatar: psy.avatar || '/src/assets/psychologist_cliff_tedyanto.jpg',
+      avatar: psy.avatar || '/assets/psychologist_cliff_tedyanto.jpg',
       specialtiesText: (psy.specialties || []).join(', '),
       priceVideo: psy.priceVideo || 250000,
       priceOffline: psy.priceOffline || 350000,
@@ -240,7 +240,7 @@ export default function SuperAdminPanel({ onBackToWebsite }) {
     const facilitator = slide.psychologist?.name || (slide.subPrograms ? 'Program for Couples' : '');
     const schedule = slide.psychologist?.schedule || (slide.pricing ? `Video: ${slide.pricing.video} • Offline: ${slide.pricing.offline}` : '');
     const badge = slide.psychologist?.badge || slide.badge || 'Layanan Unggulan';
-    const image = slide.psychologist?.image || slide.image || '/src/assets/psychologist_cliff_tedyanto.jpg';
+    const image = slide.psychologist?.image || slide.image || '/assets/psychologist_cliff_tedyanto.jpg';
     
     let rawChecklist = [];
     if (slide.checklist) {
@@ -323,7 +323,7 @@ export default function SuperAdminPanel({ onBackToWebsite }) {
           
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-white p-0.5 flex items-center justify-center shadow-xs">
-              <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
+              <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -719,7 +719,7 @@ export default function SuperAdminPanel({ onBackToWebsite }) {
                   ? `${slide.psychologist.name} (${slide.psychologist.schedule || 'Jadwal Reguler'})` 
                   : 'Program Spesial Pasangan & Hubungan (Tatap Muka & Video)';
                 const points = slide.checklist || slide.inclusions || [];
-                const imgSrc = slide.psychologist?.image || slide.image || '/src/assets/psychologist_cliff_tedyanto.jpg';
+                const imgSrc = slide.psychologist?.image || slide.image || '/assets/psychologist_cliff_tedyanto.jpg';
 
                 return (
                   <div key={slide.id || idx} className="p-5 rounded-3xl border border-slate-200 bg-slate-50/50 space-y-3 flex flex-col justify-between hover:border-sky-300 transition-all shadow-2xs">
@@ -1204,7 +1204,7 @@ export default function SuperAdminPanel({ onBackToWebsite }) {
                   {/* Live Thumbnail Preview */}
                   <div className="w-24 h-24 rounded-2xl overflow-hidden border-2 border-white shadow-md bg-slate-200 shrink-0">
                     <img
-                      src={slideFormData.image || '/src/assets/psychologist_cliff_tedyanto.jpg'}
+                      src={slideFormData.image || '/assets/psychologist_cliff_tedyanto.jpg'}
                       alt="Preview Foto"
                       className="w-full h-full object-cover object-top"
                     />

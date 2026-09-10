@@ -6,7 +6,7 @@ export const eventSlidesData = [
     psychologist: {
       name: 'Cliff Tedyanto, M.Psi., Psikolog',
       badge: 'Psikolog Klinis Mitra',
-      image: '/src/assets/psychologist_cliff_tedyanto.jpg',
+      image: '/assets/psychologist_cliff_tedyanto.jpg',
       schedule: 'Jumat & Sabtu • 11.00–20.00 WIB'
     },
     checklist: [
@@ -24,7 +24,7 @@ export const eventSlidesData = [
     id: 2,
     type: 'program-couples',
     title: 'Program for Couples ♡',
-    image: '/src/assets/indonesian_couple_counseling.jpg',
+    image: '/assets/indonesian_couple_counseling.jpg',
     subPrograms: [
       {
         name: 'Paket Pra-Nikah',

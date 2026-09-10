@@ -26,7 +26,7 @@ export default function Navbar({
           onClick={() => onSelectTab('landing')}
         >
           <div className="w-11 h-11 rounded-2xl bg-white border border-sky-100 flex items-center justify-center p-1 shadow-xs group-hover:scale-105 transition-transform overflow-hidden">
-            <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
+            <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
           </div>
           <div>
             <span className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-1">

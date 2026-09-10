@@ -152,7 +152,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
         {/* Brand Header */}
         <div className="text-center space-y-1.5 pb-4 border-b border-slate-100">
           <div className="w-12 h-12 rounded-2xl bg-white border border-sky-100 p-1 shadow-xs mx-auto flex items-center justify-center">
-            <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
+            <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
           </div>
           <h3 className="text-xl font-extrabold text-[#0c2a38] tracking-tight">
             {mode === 'login' ? 'Masuk ke Ruang Jiwa' : 'Daftar Akun Klien Baru'}

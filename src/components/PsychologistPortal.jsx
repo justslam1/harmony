@@ -11,7 +11,7 @@ export default function PsychologistPortal({ onEnterRoom, onBackToWebsite, onUpd
     name: 'Cliff Tedyanto, M.Psi., Psikolog',
     title: 'Psikolog Klinis Dewasa',
     sipp: 'SIPP: 112233-2023 (Aktif HIMPSI)',
-    avatar: '/src/assets/psychologist_cliff_tedyanto.jpg',
+    avatar: '/assets/psychologist_cliff_tedyanto.jpg',
     rating: '4.98',
     totalSessions: 312,
     rateVideo: 250000,
@@ -253,7 +253,7 @@ export default function PsychologistPortal({ onEnterRoom, onBackToWebsite, onUpd
           
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-white p-0.5 flex items-center justify-center shadow-xs">
-              <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
+              <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="flex items-center gap-2">

@@ -11,7 +11,7 @@ export const psychologistsData = [
     schedule: 'Jumat & Sabtu (11.00 – 20.00 WIB)',
     priceVideo: 250000,
     priceOffline: 350000,
-    avatar: '/src/assets/psychologist_cliff_tedyanto.jpg',
+    avatar: '/assets/psychologist_cliff_tedyanto.jpg',
     onlineStatus: true,
     instantSessionAvailable: true
   },
@@ -59,7 +59,7 @@ export const psychologistsData = [
     schedule: 'Senin, Rabu, Jumat (14.00 – 20.00 WIB)',
     priceVideo: 350000,
     priceOffline: 450000,
-    avatar: '/src/assets/dr_anisa_rahma.jpg',
+    avatar: '/assets/dr_anisa_rahma.jpg',
     onlineStatus: true,
     instantSessionAvailable: true
   }

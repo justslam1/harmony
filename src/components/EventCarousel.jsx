@@ -74,7 +74,7 @@ export default function EventCarousel({ onBookPsychologist, onSelectCoupleProgra
               <div className="lg:col-span-8 space-y-6">
                 <div className="flex items-center justify-between gap-4 flex-wrap pb-2">
                   <div className="flex items-center gap-2.5">
-                    <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
+                    <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
                     <span className="text-xl font-black text-[#0c2a38] tracking-tight">ruang<span className="text-[#0284c7]">jiwa</span></span>
                   </div>
                   <div className="flex items-center gap-4 text-xs font-bold text-[#0c2a38]">
@@ -120,7 +120,7 @@ export default function EventCarousel({ onBookPsychologist, onSelectCoupleProgra
               <div className="lg:col-span-4 flex items-center justify-center relative">
                 <div className="relative w-72 h-88 sm:w-80 sm:h-96 rounded-t-full bg-[#1a4b64] overflow-hidden shadow-2xl border-4 border-white flex items-end justify-center">
                   <img 
-                    src="/src/assets/psychologist_cliff_tedyanto.jpg" 
+                    src="/assets/psychologist_cliff_tedyanto.jpg" 
                     alt="Cliff Tedyanto" 
                     className="w-full h-full object-cover object-top scale-105 hover:scale-110 transition-transform duration-500" 
                   />
@@ -148,7 +148,7 @@ export default function EventCarousel({ onBookPsychologist, onSelectCoupleProgra
                 <div className="flex items-start gap-4">
                   <div className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-3xl overflow-hidden border-4 border-white shadow-md flex-shrink-0">
                     <img 
-                      src="/src/assets/indonesian_couple_counseling.jpg" 
+                      src="/assets/indonesian_couple_counseling.jpg" 
                       alt="Program Pasangan Ruang Jiwa" 
                       className="w-full h-full object-cover object-top" 
                     />
@@ -159,7 +159,7 @@ export default function EventCarousel({ onBookPsychologist, onSelectCoupleProgra
 
                   <div className="space-y-1.5 pt-1">
                     <div className="flex items-center gap-2">
-                      <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-7 h-7 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
+                      <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-7 h-7 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
                       <span className="text-lg font-black text-[#0c2a38] tracking-tight">ruang<span className="text-[#0284c7]">jiwa</span></span>
                     </div>
                     <h3 className="text-2xl sm:text-3xl font-black text-[#1a5276] leading-tight tracking-tight flex flex-wrap items-center gap-1.5">
@@ -246,7 +246,7 @@ export default function EventCarousel({ onBookPsychologist, onSelectCoupleProgra
               <div className="lg:col-span-8 space-y-6">
                 <div className="flex items-center justify-between gap-4 flex-wrap pb-2">
                   <div className="flex items-center gap-2.5">
-                    <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
+                    <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
                     <span className="text-xl font-black text-[#0c2a38] tracking-tight">ruang<span className="text-[#0284c7]">jiwa</span></span>
                   </div>
                   <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">✓ Sesi Online & Tatap Muka</span>
@@ -308,7 +308,7 @@ export default function EventCarousel({ onBookPsychologist, onSelectCoupleProgra
               <div className="lg:col-span-8 space-y-6">
                 <div className="flex items-center justify-between gap-4 flex-wrap pb-2">
                   <div className="flex items-center gap-2.5">
-                    <img src="/src/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
+                    <img src="/assets/logo_ruang_jiwa.png" alt="Logo Ruang Jiwa" className="w-8 h-8 rounded-full object-contain bg-white p-0.5 shadow-2xs" />
                     <span className="text-xl font-black text-[#0c2a38] tracking-tight">ruang<span className="text-[#0d9488]">jiwa</span></span>
                   </div>
                   <span className="bg-teal-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-xs">★ Event Interaktif Eksklusif</span>
