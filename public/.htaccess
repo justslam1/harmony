@@ -1,8 +1,25 @@
+# 1. Set MIME Types explicitly for LiteSpeed / Apache
+<IfModule mod_mime.c>
+  AddType application/javascript .js .mjs
+  AddType text/css .css
+  AddType image/png .png
+  AddType image/jpeg .jpg .jpeg
+  AddType image/svg+xml .svg
+</IfModule>
+
+# 2. SPA Routing Fallback
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /
-  RewriteRule ^index\.html$ - [L]
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule . /index.html [L]
+
+  # Pass existing files and directories directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # NEVER rewrite static assets to index.html (prevents MIME type "text/html" error)
+  RewriteCond %{REQUEST_URI} \.(js|mjs|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$ [NC]
+  RewriteRule ^ - [L]
+
+  # Fallback to index.html for SPA routes
+  RewriteRule ^ index.html [L]
 </IfModule>

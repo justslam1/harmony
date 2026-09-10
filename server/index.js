@@ -8,6 +8,7 @@ import psychologistRoutes from './routes/psychologists.js';
 import bookingRoutes from './routes/bookings.js';
 import screeningRoutes from './routes/screening.js';
 import authRoutes from './routes/auth.js';
+import { pool } from './config/db.js';
 
 dotenv.config();
 
@@ -36,11 +37,36 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/screening', screeningRoutes);
 app.use('/api/auth', authRoutes);
 
-// Health Check Endpoint
-app.get('/api/health', (req, res) => {
+// Health Check Endpoint with Database Diagnostic
+app.get('/api/health', async (req, res) => {
+  let dbDiagnostic = { connected: false, message: 'Pool not initialized' };
+
+  if (pool) {
+    try {
+      const start = performance.now();
+      const [tables] = await pool.query('SHOW TABLES');
+      const latencyMs = Math.round(performance.now() - start);
+
+      dbDiagnostic = {
+        connected: true,
+        databaseName: process.env.DB_NAME,
+        latency: `${latencyMs}ms`,
+        speedStatus: latencyMs < 50 ? 'Optimal (Sangat Cepat)' : 'Normal',
+        tablesDetected: tables.length,
+        tablesList: tables.map(t => Object.values(t)[0])
+      };
+    } catch (err) {
+      dbDiagnostic = {
+        connected: false,
+        error: err.message
+      };
+    }
+  }
+
   res.json({
     status: 'online',
     platform: 'Ruang Jiwa Backend REST API & Realtime WebRTC Signaling Server',
+    database: dbDiagnostic,
     timestamp: new Date().toISOString()
   });
 });
