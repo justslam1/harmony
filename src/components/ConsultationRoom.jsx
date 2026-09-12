@@ -406,31 +406,11 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="relative w-full h-full">
-                <img
-                  src={psychologist?.avatar || '/assets/psychologist_cliff_tedyanto.jpg'}
-                  alt={psychologist?.name || 'Psikolog'}
-                  className="w-full h-full object-cover object-top opacity-90 group-hover:scale-102 transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-slate-950/50 flex flex-col items-center justify-center p-6 text-center text-white">
-                  <div className="bg-slate-900/90 backdrop-blur-md p-5 rounded-3xl border border-white/20 shadow-2xl max-w-sm space-y-3">
-                    <div className="inline-flex items-center gap-2 bg-amber-500/20 text-amber-300 border border-amber-400/40 px-3 py-1 rounded-full text-[11px] font-bold">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-                      <span>WebRTC Siaga: Menunggu Lawan Bicara</span>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      Protokol WebRTC aktif. Buka tab baru sebagai lawan bicara untuk menghubungkan video audio langsung dua arah.
-                    </p>
-                    <button
-                      onClick={handleOpenPeerTab}
-                      className="w-full bg-gradient-to-r from-sky-600 to-teal-600 hover:from-sky-700 hover:to-teal-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl shadow-md transition-all cursor-pointer hover:scale-102 flex items-center justify-center gap-2"
-                    >
-                      <span>👥</span>
-                      <span>Buka Sisi {currentRole === 'client' ? 'Psikolog' : 'Klien'} di Tab Baru (Uji P2P)</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <img
+                src={psychologist?.avatar || '/assets/psychologist_cliff_tedyanto.jpg'}
+                alt={psychologist?.name || 'Psikolog'}
+                className="w-full h-full object-cover object-top opacity-95 group-hover:scale-102 transition-transform duration-700"
+              />
             )}
 
             {/* Subtle Gradient Vignette */}
