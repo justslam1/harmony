@@ -835,10 +835,15 @@ Layanan Bantuan WhatsApp: 0811-8777-078
           </div>
 
           <button
-            onClick={() => setShowEndModal(true)}
-            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-4 py-2 rounded-2xl transition-all cursor-pointer hover:scale-105"
+            onClick={isLiveSessionActive ? () => setShowEndModal(true) : onLeaveSession}
+            className={`text-xs font-bold px-4 py-2.5 rounded-2xl transition-all cursor-pointer hover:scale-105 ${
+              isLiveSessionActive
+                ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+            }`}
+            title={isLiveSessionActive ? "Akhiri sesi konseling aktif" : "Tinggalkan ruang siaga"}
           >
-            Akhiri Sesi
+            {isLiveSessionActive ? 'Akhiri Sesi' : 'Keluar Ruangan'}
           </button>
         </div>
       </div>
@@ -1055,14 +1060,33 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                 💻
               </button>
 
-              {/* End Call Button */}
-              <button
-                onClick={() => setShowEndModal(true)}
-                className="w-12 h-12 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center justify-center shadow-lg shadow-rose-900/60 transition-all cursor-pointer hover:scale-110 active:scale-95 ml-2"
-                title="Akhiri Sesi Konseling"
-              >
-                📞
-              </button>
+              {/* Call Action Button: Green (Start Call) when Standby, Red (Hangup) when Live */}
+              {isLiveSessionActive ? (
+                <button
+                  onClick={() => setShowEndModal(true)}
+                  className="w-12 h-12 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center justify-center shadow-lg shadow-rose-900/60 transition-all cursor-pointer hover:scale-110 active:scale-95 ml-2"
+                  title="Akhiri Sesi Konseling (Tutup Panggilan)"
+                >
+                  📞
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 ml-2">
+                  <button
+                    onClick={handleStartSession}
+                    className="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center shadow-lg shadow-emerald-900/60 transition-all cursor-pointer hover:scale-110 active:scale-95 animate-pulse"
+                    title="Mulai Sesi Tatap Muka Sekarang"
+                  >
+                    📞
+                  </button>
+                  <button
+                    onClick={onLeaveSession}
+                    className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer hover:scale-105 text-xs"
+                    title="Keluar / Kembali ke Jadwal"
+                  >
+                    🚪
+                  </button>
+                </div>
+              )}
 
             </div>
 
