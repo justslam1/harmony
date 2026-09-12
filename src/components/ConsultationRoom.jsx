@@ -127,9 +127,16 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     return () => clearInterval(interval);
   }, [sessionStage]);
 
-  // Countdown Timer Effect: Only starts ticking once in_session!
+  // Live Session Active State:
+  // - For client: sessionStage === 'in_session'
+  // - For psychologist: remoteStream is connected OR isSimulatedPeerActive is true
+  const isLiveSessionActive = currentRole === 'client'
+    ? sessionStage === 'in_session'
+    : Boolean(remoteStream || isSimulatedPeerActive);
+
+  // Countdown Timer Effect: ONLY starts ticking when live consultation is actually underway!
   useEffect(() => {
-    if (sessionStage !== 'in_session') return;
+    if (!isLiveSessionActive) return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -141,7 +148,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [sessionStage]);
+  }, [isLiveSessionActive]);
 
   // Format seconds to MM:SS
   const formatTime = (seconds) => {
@@ -763,7 +770,9 @@ Layanan Bantuan WhatsApp: 0811-8777-078
             </div>
             <h3 className="text-base sm:text-lg font-extrabold text-[#0c2a38] mt-0.5">
               {isPsychologistHost 
-                ? `Ruang Konseling Klinis • Pasien: ${waitingClientInfo?.name || patientInfo.name} (${patientInfo.age})` 
+                ? (isLiveSessionActive 
+                    ? `Sesi Konseling Aktif • Pasien: ${waitingClientInfo?.name || patientInfo.name} (${patientInfo.age})` 
+                    : `Ruang Praktik Siaga (Standby) • Pasien: ${waitingClientInfo?.name || patientInfo.name} (${patientInfo.age})`)
                 : `Konseling Telemedis bersama ${psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}`}
             </h3>
           </div>
@@ -810,9 +819,19 @@ Layanan Bantuan WhatsApp: 0811-8777-078
           </button>
 
           {/* Timer Badge */}
-          <div className="flex items-center gap-2 bg-slate-900 text-white px-3.5 py-2 rounded-2xl shadow-inner text-sm font-mono font-bold tracking-wider">
-            <span className="text-rose-400">⏱️</span>
+          <div 
+            className="flex items-center gap-2 bg-slate-900 text-white px-3.5 py-2 rounded-2xl shadow-inner text-sm font-mono font-bold tracking-wider"
+            title={isLiveSessionActive ? "Timer 60 menit sedang berjalan" : "Timer dijeda (Siaga). Waktu baru dihitung saat sesi dimulai."}
+          >
+            <span className={isLiveSessionActive ? "text-rose-400 animate-pulse" : "text-amber-400"}>
+              {isLiveSessionActive ? '⏱️' : '⏸️'}
+            </span>
             <span>{formatTime(timeLeft)}</span>
+            {!isLiveSessionActive && (
+              <span className="text-[10px] font-sans font-extrabold text-amber-300 bg-amber-950/80 px-1.5 py-0.5 rounded-md uppercase">
+                Siaga
+              </span>
+            )}
           </div>
 
           <button
@@ -919,6 +938,12 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                       <span>Buka Tab Pasien</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Standby Timer Reassurance Notice */}
+                <div className="bg-white/10 px-3.5 py-1.5 rounded-xl border border-white/15 text-[11px] text-amber-200 flex items-center gap-2">
+                  <span>⏱️</span>
+                  <span>Timer 60 menit BELUM berjalan. Waktu baru dihitung saat sesi tatap muka dimulai.</span>
                 </div>
 
                 {/* Patient summary badge at bottom */}
