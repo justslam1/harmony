@@ -46,6 +46,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   // WebRTC Live Connection States
   const [webrtcStatus, setWebrtcStatus] = useState('waiting'); // 'waiting' | 'connected' | 'disconnected'
   const [remoteStream, setRemoteStream] = useState(null);
+  const [isSimulatedPeerActive, setIsSimulatedPeerActive] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const remoteVideoRef = useRef(null);
   const webrtcManagerRef = useRef(null);
@@ -271,7 +272,19 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
       webrtcManagerRef.current.admitClient();
     }
     setIsClientWaiting(false);
-    setHostAlert('✓ Pasien telah diizinkan masuk! Sesi konseling & timer 60 menit resmi dimulai.');
+    setIsSimulatedPeerActive(true);
+    setHostAlert('✓ Pasien telah diizinkan masuk! Sesi tatap muka resmi dimulai.');
+    setTimeout(() => setHostAlert(''), 4000);
+  };
+
+  // Directly start session with patient (either admits waiting client or starts simulated active session)
+  const handleStartSession = () => {
+    if (isClientWaiting && webrtcManagerRef.current) {
+      webrtcManagerRef.current.admitClient();
+      setIsClientWaiting(false);
+    }
+    setIsSimulatedPeerActive(true);
+    setHostAlert('✓ Sesi konseling dimulai! Mode tatap muka aktif bersama pasien.');
     setTimeout(() => setHostAlert(''), 4000);
   };
 
@@ -736,10 +749,10 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                 </span>
               )}
               <span className="text-xs text-slate-400 font-semibold">• ID: {roomId}</span>
-              {webrtcStatus === 'connected' ? (
+              {webrtcStatus === 'connected' || isSimulatedPeerActive ? (
                 <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100/80 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
                   <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
-                  WebRTC P2P Aktif (2 Arah)
+                  {webrtcStatus === 'connected' ? 'WebRTC P2P Aktif (2 Arah)' : 'Sesi Konseling Aktif'}
                 </span>
               ) : (
                 <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
@@ -757,6 +770,18 @@ Layanan Bantuan WhatsApp: 0811-8777-078
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* Main Action to Start Session for Psychologist */}
+          {isPsychologistHost && !remoteStream && !isSimulatedPeerActive && (
+            <button
+              onClick={handleStartSession}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2 rounded-2xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md hover:scale-105 animate-pulse"
+              title="Mulai sesi konseling langsung dengan pasien"
+            >
+              <span>▶️</span>
+              <span>Mulai Sesi</span>
+            </button>
+          )}
+
           {/* Quick Role Switcher for Testing / Preview */}
           <button
             onClick={handleToggleRolePreview}
@@ -806,7 +831,7 @@ Layanan Bantuan WhatsApp: 0811-8777-078
         <div className="lg:col-span-8 space-y-4">
           <div className="relative w-full h-[450px] sm:h-[530px] bg-[#0c2a38] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 flex items-center justify-center group">
             
-            {/* Main Video View: WebRTC Remote Stream OR Dedicated Host/Client Standby Screen */}
+            {/* Main Video View: WebRTC Remote Stream OR Simulated Patient OR Host/Client Standby Screen */}
             {remoteStream ? (
               <video
                 ref={remoteVideoRef}
@@ -814,8 +839,35 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                 playsInline
                 className="w-full h-full object-cover"
               />
+            ) : isSimulatedPeerActive ? (
+              /* ACTIVE PATIENT LIVE VIDEO (Simulated or Direct Started) */
+              <div className="relative w-full h-full bg-[#071720] flex items-center justify-center overflow-hidden">
+                <img
+                  src="/assets/indonesian_counseling_hero.jpg"
+                  alt={patientInfo.name}
+                  className="w-full h-full object-cover opacity-90 scale-105 filter brightness-95"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/30 pointer-events-none"></div>
+
+                {/* Patient presence indicator */}
+                <div className="absolute bottom-20 left-4 flex items-center gap-2 bg-slate-900/85 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-white/20 text-white text-xs shadow-lg">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="font-extrabold">{patientInfo.name} (Pasien)</span>
+                  <span className="text-[10px] text-emerald-300 font-semibold bg-emerald-950/70 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                    🎙️ Audio & Video Aktif
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setIsSimulatedPeerActive(false)}
+                  className="absolute top-4 left-56 bg-slate-900/80 hover:bg-slate-900 text-slate-300 hover:text-white text-[11px] font-bold px-3 py-1.5 rounded-xl border border-white/20 transition-all cursor-pointer shadow-sm"
+                  title="Kembali ke layar siaga menunggu pasien"
+                >
+                  ← Jeda / Layar Siaga
+                </button>
+              </div>
             ) : isPsychologistHost ? (
-              /* PSYCHOLOGIST HOST STANDBY SCREEN (Never show psychologist's own picture as their client!) */
+              /* PSYCHOLOGIST HOST STANDBY SCREEN */
               <div className="w-full h-full bg-gradient-to-b from-[#0e2c3b] to-[#081922] flex flex-col items-center justify-center p-6 text-center text-white space-y-4 relative">
                 
                 <div className="relative">
@@ -832,48 +884,45 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                     Ruang Telekonseling Siaga (Host Aktif)
                   </span>
                   <h4 className="text-lg sm:text-xl font-black text-white pt-1">
-                    Menunggu Pasien Masuk ke Ruang Sesi
+                    {isClientWaiting ? 'Pasien Sudah Tiba di Lobi Virtual!' : 'Siap Memulai Sesi Konseling'}
                   </h4>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    Kamera dan audio Anda siap. Saat pasien bergabung di lobi virtual, notifikasi penerimaan pasien akan muncul otomatis.
+                    {isClientWaiting
+                      ? `Pasien ${waitingClientInfo?.name || patientInfo.name} sedang menunggu di lobi. Klik tombol di bawah untuk membuka sesi tatap muka.`
+                      : 'Kamera dan audio Anda siap. Klik tombol "Mulai Sesi Sekarang" untuk tatap muka langsung, atau bagikan link ke pasien.'}
                   </p>
                 </div>
 
-                {isClientWaiting ? (
-                  <div className="p-4 rounded-2xl bg-amber-500/20 border-2 border-amber-400 max-w-sm w-full space-y-2.5 animate-bounce shadow-xl">
-                    <p className="text-xs font-black text-amber-200 flex items-center justify-center gap-1.5">
-                      <span>🔔</span>
-                      <span>Pasien {waitingClientInfo?.name || patientInfo.name} telah di lobi!</span>
-                    </p>
-                    <button
-                      onClick={handleAdmitClient}
-                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs py-2.5 rounded-xl shadow-lg transition-all cursor-pointer hover:scale-102 flex items-center justify-center gap-2"
-                    >
-                      <span>🚪</span>
-                      <span>Izinkan Pasien Masuk Sekarang</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
+                {/* PRIMARY CALL TO ACTION BUTTON */}
+                <div className="flex flex-col items-center gap-2.5 w-full max-w-sm pt-1">
+                  <button
+                    onClick={handleStartSession}
+                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-extrabold text-sm py-3.5 px-6 rounded-2xl shadow-xl shadow-emerald-900/50 transition-all cursor-pointer hover:scale-105 flex items-center justify-center gap-2 border border-emerald-400/40 animate-pulse"
+                  >
+                    <span className="text-lg">▶️</span>
+                    <span>{isClientWaiting ? 'Izinkan Pasien Masuk & Mulai Sesi' : 'Mulai Sesi Konseling Sekarang'}</span>
+                  </button>
+
+                  <div className="flex items-center gap-2 w-full">
                     <button
                       onClick={handleCopyRoomLink}
-                      className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-white/20 transition-all cursor-pointer flex items-center gap-2"
+                      className="flex-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2.5 px-3 rounded-xl border border-white/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <span>📋</span>
-                      <span>{copiedLink ? 'Tautan Pasien Disalin!' : 'Salin Tautan Pasien'}</span>
+                      <span>{copiedLink ? 'Tautan Disalin!' : 'Salin Tautan Pasien'}</span>
                     </button>
                     <button
                       onClick={handleOpenPeerTab}
-                      className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                      className="flex-1 bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
                     >
                       <span>👥</span>
-                      <span>Buka Tab Pasien (Uji Coba)</span>
+                      <span>Buka Tab Pasien</span>
                     </button>
                   </div>
-                )}
+                </div>
 
                 {/* Patient summary badge at bottom */}
-                <div className="pt-2 text-[11px] text-slate-400 flex items-center gap-2 flex-wrap justify-center">
+                <div className="pt-1 text-[11px] text-slate-400 flex items-center gap-2 flex-wrap justify-center">
                   <span>Pasien: <strong className="text-teal-200">{patientInfo.name}</strong></span>
                   <span>•</span>
                   <span>{patientInfo.sessionNumber}</span>
@@ -896,14 +945,14 @@ Layanan Bantuan WhatsApp: 0811-8777-078
 
             {/* Top Left Name Tag Overlay */}
             <div className="absolute top-4 left-4 flex items-center gap-2.5 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/20 shadow-lg text-white">
-              <span className={`w-2.5 h-2.5 rounded-full ${remoteStream ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+              <span className={`w-2.5 h-2.5 rounded-full ${remoteStream || isSimulatedPeerActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
               <span className="text-xs font-extrabold">
                 {isPsychologistHost
-                  ? (remoteStream ? `${waitingClientInfo?.name || patientInfo.name} (Pasien)` : 'Layar Pasien (Standby)')
+                  ? (remoteStream || isSimulatedPeerActive ? `${waitingClientInfo?.name || patientInfo.name} (Pasien)` : 'Layar Pasien (Standby)')
                   : (psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog')}
               </span>
               <span className="text-[10px] text-sky-300 font-semibold bg-white/10 px-2 py-0.5 rounded-md">
-                {remoteStream ? 'WebRTC Live' : (isPsychologistHost ? 'Pasien' : 'Host')}
+                {remoteStream ? 'WebRTC Live' : (isSimulatedPeerActive ? 'Sesi Aktif' : (isPsychologistHost ? 'Pasien' : 'Host'))}
               </span>
             </div>
 
