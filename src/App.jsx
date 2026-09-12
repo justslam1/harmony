@@ -30,8 +30,26 @@ export default function App() {
   const [activeSession, setActiveSession] = useState(null);
   const [psychologists, setPsychologists] = useState(psychologistsData);
 
-  // Load cached user on start
+  // Load cached user or check direct WebRTC room URL parameter
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+    const roleParam = params.get('role');
+
+    if (roomParam) {
+      const isPsychologist = roleParam === 'psychologist';
+      const mockSessionUser = {
+        id: isPsychologist ? 999 : 888,
+        name: isPsychologist ? 'Cliff Tedyanto, M.Psi., Psikolog' : 'Klien Ruang Jiwa',
+        email: isPsychologist ? 'cliff@ruangjiwa.id' : 'klien@ruangjiwa.id',
+        role: isPsychologist ? 'psychologist' : 'client'
+      };
+      setCurrentUser(mockSessionUser);
+      setActiveSession(psychologistsData[0]);
+      setActiveTab('consultation');
+      return;
+    }
+
     const user = apiClient.getCurrentUser();
     if (user) {
       setCurrentUser(user);
@@ -177,6 +195,7 @@ export default function App() {
             ) : (
               <ConsultationRoom 
                 psychologist={activeSession || psychologistsData[0]}
+                currentUser={currentUser}
                 onLeaveSession={() => setActiveTab('landing')}
               />
             )}

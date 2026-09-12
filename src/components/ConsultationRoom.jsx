@@ -1,12 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { WebRTCManager } from '../services/webrtcManager';
 
-export default function ConsultationRoom({ psychologist, onLeaveSession }) {
+export default function ConsultationRoom({ psychologist, currentUser, onLeaveSession }) {
+  // Determine Role & Room ID for WebRTC Peer-to-Peer
+  const urlParams = new URLSearchParams(window.location.search);
+  const currentRole = urlParams.get('role') || (currentUser?.role === 'psychologist' ? 'psychologist' : 'client');
+  const roomId = urlParams.get('room') || 'RJ-8821940';
+
   // Media States
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState(null);
+
+  // WebRTC Live Connection States
+  const [webrtcStatus, setWebrtcStatus] = useState('waiting'); // 'waiting' | 'connected' | 'disconnected'
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const remoteVideoRef = useRef(null);
+  const webrtcManagerRef = useRef(null);
 
   // Active Tab: 'chat' | 'worksheet'
   const [activeSideTab, setActiveSideTab] = useState('chat');
@@ -19,7 +32,7 @@ export default function ConsultationRoom({ psychologist, onLeaveSession }) {
     {
       id: 1,
       sender: 'system',
-      text: 'Sesi privat dimulai. Komunikasi dilindungi enkripsi medis end-to-end 256-bit.',
+      text: 'Sesi privat WebRTC dimulai. Komunikasi dilindungi enkripsi medis peer-to-end 256-bit.',
       time: '14:00'
     },
     {
@@ -70,11 +83,11 @@ export default function ConsultationRoom({ psychologist, onLeaveSession }) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Initialize Local Webcam Stream
+  // Initialize Local Webcam Stream & WebRTC Peer-to-Peer
   useEffect(() => {
     let streamInstance = null;
 
-    async function startCamera() {
+    async function startCameraAndWebRTC() {
       try {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({
@@ -88,6 +101,36 @@ export default function ConsultationRoom({ psychologist, onLeaveSession }) {
           }
           setCameraActive(true);
           setCameraError(null);
+
+          // Initialize WebRTC P2P Manager
+          const rtc = new WebRTCManager({
+            roomId,
+            role: currentRole,
+            onRemoteStream: (remStream) => {
+              console.log('[ConsultationRoom] Received Remote WebRTC Stream');
+              setRemoteStream(remStream);
+              setWebrtcStatus('connected');
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = remStream;
+              }
+            },
+            onConnectionState: (state) => {
+              if (state === 'connected') {
+                setWebrtcStatus('connected');
+              } else if (state === 'disconnected') {
+                setWebrtcStatus('disconnected');
+                setRemoteStream(null);
+              } else {
+                setWebrtcStatus('waiting');
+              }
+            },
+            onChatMessage: (incomingMsg) => {
+              setChatMessages((prev) => [...prev, incomingMsg]);
+            }
+          });
+
+          webrtcManagerRef.current = rtc;
+          await rtc.start(stream);
         }
       } catch (err) {
         console.warn('Webcam tidak dapat diakses atau izin ditolak:', err);
@@ -96,10 +139,13 @@ export default function ConsultationRoom({ psychologist, onLeaveSession }) {
       }
     }
 
-    startCamera();
+    startCameraAndWebRTC();
 
     return () => {
-      // Cleanup tracks on unmount
+      // Cleanup WebRTC connection & media tracks
+      if (webrtcManagerRef.current) {
+        webrtcManagerRef.current.close();
+      }
       if (streamInstance) {
         streamInstance.getTracks().forEach((track) => track.stop());
       }
@@ -107,7 +153,30 @@ export default function ConsultationRoom({ psychologist, onLeaveSession }) {
         localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [roomId, currentRole]);
+
+  // Keep remote video element synced when remoteStream arrives
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  // Handler to open peer side in a new tab for instant testing
+  const handleOpenPeerTab = () => {
+    const nextRole = currentRole === 'client' ? 'psychologist' : 'client';
+    const peerUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}&role=${nextRole}`;
+    window.open(peerUrl, '_blank');
+  };
+
+  // Handler to copy invite link
+  const handleCopyRoomLink = () => {
+    const nextRole = currentRole === 'client' ? 'psychologist' : 'client';
+    const peerUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}&role=${nextRole}`;
+    navigator.clipboard.writeText(peerUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
+  };
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -174,40 +243,53 @@ export default function ConsultationRoom({ psychologist, onLeaveSession }) {
     const userMsg = inputText.trim();
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    const updated = [
-      ...chatMessages,
-      {
-        id: Date.now(),
-        sender: 'me',
-        text: userMsg,
-        time: timeNow
-      }
-    ];
-    setChatMessages(updated);
+    const mySenderName = currentRole === 'psychologist' 
+      ? (psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog')
+      : (currentUser?.name || 'Anda');
+
+    const newMsg = {
+      id: Date.now(),
+      sender: 'me',
+      senderName: mySenderName,
+      text: userMsg,
+      time: timeNow
+    };
+
+    setChatMessages((prev) => [...prev, newMsg]);
     setInputText('');
 
-    // Psychologist auto response simulation
-    setIsPsychologistTyping(true);
-    setTimeout(() => {
-      const responses = [
-        'Terima kasih sudah membagikan hal ini. Sangat wajar dan valid jika kamu merasakan beban seperti itu dalam situasimu saat ini.',
-        'Saya mendengarkan dengan seksama. Coba tarik napas perlahan... Sejak kapan perasaan atau pikiran tersebut mulai terasa paling intens?',
-        'Langkah yang sangat baik untuk menyuarakan apa yang ada di pikiranmu. Mari kita urai perlahan polanya bersama-sama.',
-        'Perasaanmu sangat bisa dimengerti. Apakah ada momen tertentu dalam keseharian yang biasanya memicu perasaan ini muncul kembali?'
-      ];
-      const randomReply = responses[Math.floor(Math.random() * responses.length)];
+    // Transmit over WebRTC DataChannel to the connected peer
+    const sentOverP2P = webrtcManagerRef.current?.sendPeerMessage({
+      id: Date.now() + 1,
+      sender: mySenderName,
+      text: userMsg,
+      time: timeNow
+    });
 
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          sender: psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog',
-          text: randomReply,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-      setIsPsychologistTyping(false);
-    }, 1800);
+    // If no peer is connected yet and user is client, run simulated psychologist response
+    if (webrtcStatus !== 'connected' && currentRole === 'client') {
+      setIsPsychologistTyping(true);
+      setTimeout(() => {
+        const responses = [
+          'Terima kasih sudah membagikan hal ini. Sangat wajar dan valid jika kamu merasakan beban seperti itu dalam situasimu saat ini.',
+          'Saya mendengarkan dengan seksama. Coba tarik napas perlahan... Sejak kapan perasaan atau pikiran tersebut mulai terasa paling intens?',
+          'Langkah yang sangat baik untuk menyuarakan apa yang ada di pikiranmu. Mari kita urai perlahan polanya bersama-sama.',
+          'Perasaanmu sangat bisa dimengerti. Apakah ada momen tertentu dalam keseharian yang biasanya memicu perasaan ini muncul kembali?'
+        ];
+        const randomReply = responses[Math.floor(Math.random() * responses.length)];
+
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 2,
+            sender: psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog',
+            text: randomReply,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
+        setIsPsychologistTyping(false);
+      }, 1800);
+    }
   };
 
   // Download Worksheet Summary as .txt file
@@ -248,15 +330,26 @@ Layanan Bantuan WhatsApp: 0811-8777-078
       <div className="bg-white rounded-3xl p-4 sm:p-5 border border-sky-100 shadow-sm flex items-center justify-between gap-4 mb-5 flex-wrap">
         <div className="flex items-center gap-3.5">
           <div className="relative flex items-center justify-center">
-            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 animate-ping absolute"></span>
-            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 relative"></span>
+            <span className={`w-3.5 h-3.5 rounded-full animate-ping absolute ${webrtcStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            <span className={`w-3.5 h-3.5 rounded-full relative ${webrtcStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
                 Sesi Berlangsung
               </span>
-              <span className="text-xs text-slate-400 font-semibold">• ID: RJ-8821940</span>
+              <span className="text-xs text-slate-400 font-semibold">• ID: {roomId}</span>
+              {webrtcStatus === 'connected' ? (
+                <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100/80 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                  WebRTC P2P Aktif (2 Arah)
+                </span>
+              ) : (
+                <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  WebRTC Siaga (Menunggu Lawan Bicara)
+                </span>
+              )}
             </div>
             <h3 className="text-base sm:text-lg font-extrabold text-[#0c2a38] mt-0.5">
               Konseling Telemedis bersama {psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}
@@ -264,7 +357,24 @@ Layanan Bantuan WhatsApp: 0811-8777-078
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Action to test peer connection in 2nd tab */}
+          <button
+            onClick={handleOpenPeerTab}
+            title="Buka lawan bicara di tab baru untuk mencoba WebRTC P2P langsung"
+            className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold px-3.5 py-2 rounded-2xl transition-all cursor-pointer hover:scale-105 flex items-center gap-1.5 shadow-2xs"
+          >
+            <span>👥</span>
+            <span>Uji Buka Sisi {currentRole === 'client' ? 'Psikolog' : 'Klien'} (Tab Baru)</span>
+          </button>
+
+          <button
+            onClick={handleCopyRoomLink}
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-2xl transition-all cursor-pointer shadow-2xs"
+          >
+            {copiedLink ? '✓ Tautan Disalin!' : '📋 Salin Link'}
+          </button>
+
           {/* Timer Badge */}
           <div className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-2xl shadow-inner text-sm font-mono font-bold tracking-wider">
             <span className="text-rose-400">⏱️</span>
@@ -287,21 +397,54 @@ Layanan Bantuan WhatsApp: 0811-8777-078
         <div className="lg:col-span-8 space-y-4">
           <div className="relative w-full h-[450px] sm:h-[520px] bg-[#0c2a38] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 flex items-center justify-center group">
             
-            {/* Main Video View: Psychologist Stream */}
-            <img
-              src={psychologist?.avatar || '/assets/psychologist_cliff_tedyanto.jpg'}
-              alt={psychologist?.name || 'Psikolog'}
-              className="w-full h-full object-cover object-top opacity-95 group-hover:scale-102 transition-transform duration-700"
-            />
+            {/* Main Video View: WebRTC Remote Stream OR Standby Preview */}
+            {remoteStream ? (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="relative w-full h-full">
+                <img
+                  src={psychologist?.avatar || '/assets/psychologist_cliff_tedyanto.jpg'}
+                  alt={psychologist?.name || 'Psikolog'}
+                  className="w-full h-full object-cover object-top opacity-90 group-hover:scale-102 transition-transform duration-700"
+                />
+                <div className="absolute inset-0 bg-slate-950/50 flex flex-col items-center justify-center p-6 text-center text-white">
+                  <div className="bg-slate-900/90 backdrop-blur-md p-5 rounded-3xl border border-white/20 shadow-2xl max-w-sm space-y-3">
+                    <div className="inline-flex items-center gap-2 bg-amber-500/20 text-amber-300 border border-amber-400/40 px-3 py-1 rounded-full text-[11px] font-bold">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                      <span>WebRTC Siaga: Menunggu Lawan Bicara</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Protokol WebRTC aktif. Buka tab baru sebagai lawan bicara untuk menghubungkan video audio langsung dua arah.
+                    </p>
+                    <button
+                      onClick={handleOpenPeerTab}
+                      className="w-full bg-gradient-to-r from-sky-600 to-teal-600 hover:from-sky-700 hover:to-teal-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl shadow-md transition-all cursor-pointer hover:scale-102 flex items-center justify-center gap-2"
+                    >
+                      <span>👥</span>
+                      <span>Buka Sisi {currentRole === 'client' ? 'Psikolog' : 'Klien'} di Tab Baru (Uji P2P)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Subtle Gradient Vignette */}
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/40 pointer-events-none"></div>
 
-            {/* Top Left Psychologist Name Tag Overlay */}
+            {/* Top Left Name Tag Overlay */}
             <div className="absolute top-4 left-4 flex items-center gap-2.5 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/20 shadow-lg text-white">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-              <span className="text-xs font-extrabold">{psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}</span>
-              <span className="text-[10px] text-sky-300 font-semibold bg-white/10 px-2 py-0.5 rounded-md">Host</span>
+              <span className={`w-2.5 h-2.5 rounded-full ${remoteStream ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+              <span className="text-xs font-extrabold">
+                {currentRole === 'client' ? (psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog') : 'Klien Ruang Jiwa'}
+              </span>
+              <span className="text-[10px] text-sky-300 font-semibold bg-white/10 px-2 py-0.5 rounded-md">
+                {remoteStream ? 'WebRTC Live' : 'Host'}
+              </span>
             </div>
 
             {/* Client Mini Picture-in-Picture (PiP) Webcam Stream */}
@@ -332,7 +475,7 @@ Layanan Bantuan WhatsApp: 0811-8777-078
               {/* PiP Top Badge */}
               <div className="relative z-10 flex items-center justify-between">
                 <span className="bg-slate-900/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-md border border-white/20">
-                  Anda
+                  Anda ({currentRole === 'psychologist' ? 'Psikolog' : 'Klien'})
                 </span>
                 {isMuted && (
                   <span className="bg-rose-600 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">
