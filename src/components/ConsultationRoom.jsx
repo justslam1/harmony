@@ -285,12 +285,6 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     }
   }, [remoteStream]);
 
-  // Handler to open peer side in a new tab for instant testing
-  const handleOpenPeerTab = () => {
-    const nextRole = currentRole === 'client' ? 'psychologist' : 'client';
-    const peerUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}&role=${nextRole}`;
-    window.open(peerUrl, '_blank');
-  };
 
   // Handler to copy invite link
   const handleCopyRoomLink = () => {
@@ -334,18 +328,6 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     setTimeout(() => setHostAlert(''), 4000);
   };
 
-  // Toggle Role for easy previewing (Development / Testing mode)
-  const handleToggleRolePreview = () => {
-    const nextRole = currentRole === 'psychologist' ? 'client' : 'psychologist';
-    setCurrentRole(nextRole);
-    if (nextRole === 'psychologist') {
-      setSessionStage('in_session');
-      setActiveSideTab('soap');
-    } else {
-      setSessionStage('waiting_room');
-      setActiveSideTab('chat');
-    }
-  };
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -700,23 +682,6 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                 </div>
               </div>
 
-              {/* Developer / Testing Simulation Button: Allow client to enter directly if testing solo */}
-              <div className="pt-1 flex items-center gap-2">
-                <button
-                  onClick={() => setSessionStage('in_session')}
-                  className="flex-1 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 hover:border-slate-300 text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-2xs"
-                >
-                  <span>⚡</span>
-                  <span>Masuk Langsung (Simulasi)</span>
-                </button>
-                <button
-                  onClick={handleToggleRolePreview}
-                  className="bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
-                  title="Beralih ke tampilan Psikolog Host"
-                >
-                  👨‍⚕️ Mode Psikolog
-                </button>
-              </div>
 
             </div>
 
@@ -830,25 +795,6 @@ Layanan Bantuan WhatsApp: 0811-8777-078
             </button>
           )}
 
-          {/* Quick Role Switcher for Testing / Preview */}
-          <button
-            onClick={handleToggleRolePreview}
-            title="Ganti tampilan antara mode Host Psikolog dan Pasien Klien"
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-2xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-          >
-            <span>🔄</span>
-            <span>{isPsychologistHost ? 'Pratinjau Sisi Klien' : 'Mode Psikolog'}</span>
-          </button>
-
-          {/* Action to test peer connection in 2nd tab */}
-          <button
-            onClick={handleOpenPeerTab}
-            title="Buka lawan bicara di tab baru untuk mencoba WebRTC P2P langsung"
-            className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold px-3 py-2 rounded-2xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-          >
-            <span>👥</span>
-            <span>Uji Buka Sisi {isPsychologistHost ? 'Klien' : 'Psikolog'} (Tab Baru)</span>
-          </button>
 
           <button
             onClick={handleCopyRoomLink}
@@ -966,22 +912,13 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                     <span>{isClientWaiting ? 'Izinkan Pasien Masuk & Mulai Sesi' : 'Mulai Sesi Konseling Sekarang'}</span>
                   </button>
 
-                  <div className="flex items-center gap-2 w-full">
-                    <button
-                      onClick={handleCopyRoomLink}
-                      className="flex-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2.5 px-3 rounded-xl border border-white/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <span>📋</span>
-                      <span>{copiedLink ? 'Tautan Disalin!' : 'Salin Tautan Pasien'}</span>
-                    </button>
-                    <button
-                      onClick={handleOpenPeerTab}
-                      className="flex-1 bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      <span>👥</span>
-                      <span>Buka Tab Pasien</span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleCopyRoomLink}
+                    className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2.5 px-4 rounded-xl border border-white/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>📋</span>
+                    <span>{copiedLink ? '✓ Tautan Pasien Telah Disalin!' : 'Salin Tautan Ruang Pasien'}</span>
+                  </button>
                 </div>
 
                 {/* Standby Timer Reassurance Notice */}
