@@ -196,7 +196,13 @@ export default function App() {
               <ConsultationRoom 
                 psychologist={activeSession || psychologistsData[0]}
                 currentUser={currentUser}
-                onLeaveSession={() => setActiveTab('landing')}
+                onLeaveSession={() => {
+                  if (currentUser?.role === 'psychologist') {
+                    setActiveTab('psychologist-portal');
+                  } else {
+                    setActiveTab('landing');
+                  }
+                }}
               />
             )}
           </div>

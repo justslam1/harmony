@@ -4,15 +4,37 @@ import { WebRTCManager } from '../services/webrtcManager';
 export default function ConsultationRoom({ psychologist, currentUser, onLeaveSession }) {
   // Determine Role & Room ID for WebRTC Peer-to-Peer
   const urlParams = new URLSearchParams(window.location.search);
-  const currentRole = urlParams.get('role') || (currentUser?.role === 'psychologist' ? 'psychologist' : 'client');
+  const isPsychologistByAuth = currentUser?.role === 'psychologist';
+  const roleFromUrl = urlParams.get('role');
+  
+  // If logged in as psychologist, default to psychologist; otherwise use URL param or 'client'
+  const defaultRole = isPsychologistByAuth ? 'psychologist' : (roleFromUrl || 'client');
+  const [currentRole, setCurrentRole] = useState(defaultRole);
   const roomId = urlParams.get('room') || 'RJ-8821940';
 
-  // Professional Flow: 'waiting_room' (Client before admission) | 'in_session' (Active Telehealth)
-  const [sessionStage, setSessionStage] = useState(currentRole === 'psychologist' ? 'in_session' : 'waiting_room');
+  // Professional Flow:
+  // - Psychologists always enter 'in_session' directly (Host Mode)
+  // - Clients start in 'waiting_room' until admitted by host
+  const [sessionStage, setSessionStage] = useState(defaultRole === 'psychologist' ? 'in_session' : 'waiting_room');
   const [isClientWaiting, setIsClientWaiting] = useState(false);
   const [waitingClientInfo, setWaitingClientInfo] = useState(null);
   const [hostAlert, setHostAlert] = useState('');
   const [mindfulnessPhase, setMindfulnessPhase] = useState('inhale'); // 'inhale' | 'hold' | 'exhale'
+
+  // Synchronize role and session stage whenever currentUser changes
+  useEffect(() => {
+    if (currentUser?.role === 'psychologist') {
+      setCurrentRole('psychologist');
+      setSessionStage('in_session');
+    }
+  }, [currentUser]);
+
+  // Ensure psychologist never gets trapped in waiting room
+  useEffect(() => {
+    if (currentRole === 'psychologist' && sessionStage === 'waiting_room') {
+      setSessionStage('in_session');
+    }
+  }, [currentRole, sessionStage]);
 
   // Media States
   const [isMuted, setIsMuted] = useState(false);
@@ -28,8 +50,30 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   const remoteVideoRef = useRef(null);
   const webrtcManagerRef = useRef(null);
 
-  // Active Tab: 'chat' | 'worksheet'
-  const [activeSideTab, setActiveSideTab] = useState('chat');
+  // Active Side Tab:
+  // For Psychologist: 'soap' | 'chat' | 'intake'
+  // For Client: 'chat' | 'worksheet'
+  const [activeSideTab, setActiveSideTab] = useState(defaultRole === 'psychologist' ? 'soap' : 'chat');
+
+  // Patient Info (For Psychologist Host View)
+  const [patientInfo, setPatientInfo] = useState({
+    name: 'Nadia Safitri',
+    age: '26 Tahun',
+    occupation: 'Karyawan Swasta',
+    topic: 'Kecemasan berlebih terkait beban kerja & insomnia 2 minggu terakhir',
+    sessionNumber: 'Sesi ke-2 dari 3 Sesi',
+    dassScore: 'Ansietas Sedang (Skor 12)',
+    dassDetail: { depression: 4, anxiety: 12, stress: 8 }
+  });
+
+  // Clinical Notes (SOAP Notes for Psychologist)
+  const [soapNotes, setSoapNotes] = useState({
+    subjective: 'Klien mengeluhkan dada sering berdebar dan sulit tidur (insomnia onset) terutama menjelang hari Senin atau presentasi tim. Merasa overthinking bahwa pekerjaannya selalu belum cukup baik.',
+    objective: 'Kontak mata konsisten, afek cemas (anxious affect), laju bicara agak cepat di awal sesi namun melambat setelah relaksasi. Postur tubuh tegang di area bahu.',
+    assessment: 'F41.1 Generalized Anxiety Symptoms dengan pola distorsi kognitif "Catastrophizing" dan "Should Statements". Mekanisme koping maladaptif berupa avoidance.',
+    plan: '1. Psikoedukasi respon fight-or-flight.\n2. Latihan Cognitive Restructuring untuk menantang automatic thoughts.\n3. Homework: Jadwal cemas (worry time) 15 menit/hari & pernapasan 4-7-8 sebelum tidur.\n4. Jadwalkan sesi evaluasi 1 minggu ke depan.'
+  });
+  const [soapSavedAlert, setSoapSavedAlert] = useState(false);
 
   // Timer: 60 minutes countdown (3600 seconds) - ONLY counts when in_session!
   const [timeLeft, setTimeLeft] = useState(3600);
@@ -52,7 +96,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   const [inputText, setInputText] = useState('');
   const [isPsychologistTyping, setIsPsychologistTyping] = useState(false);
 
-  // Worksheet Notes
+  // Worksheet Notes (For Client)
   const [worksheetNotes, setWorksheetNotes] = useState({
     trigger: '',
     emotion: '',
@@ -213,8 +257,9 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
 
   // Handler to copy invite link
   const handleCopyRoomLink = () => {
-    const nextRole = currentRole === 'client' ? 'psychologist' : 'client';
-    const peerUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}&role=${nextRole}`;
+    // If current is psychologist, copy the client link so the patient can open it directly
+    const targetRole = currentRole === 'psychologist' ? 'client' : 'psychologist';
+    const peerUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}&role=${targetRole}`;
     navigator.clipboard.writeText(peerUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 3000);
@@ -228,6 +273,19 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     setIsClientWaiting(false);
     setHostAlert('✓ Pasien telah diizinkan masuk! Sesi konseling & timer 60 menit resmi dimulai.');
     setTimeout(() => setHostAlert(''), 4000);
+  };
+
+  // Toggle Role for easy previewing (Development / Testing mode)
+  const handleToggleRolePreview = () => {
+    const nextRole = currentRole === 'psychologist' ? 'client' : 'psychologist';
+    setCurrentRole(nextRole);
+    if (nextRole === 'psychologist') {
+      setSessionStage('in_session');
+      setActiveSideTab('soap');
+    } else {
+      setSessionStage('waiting_room');
+      setActiveSideTab('chat');
+    }
   };
 
   // Scroll chat to bottom
@@ -287,7 +345,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     }
   };
 
-  // Handle Client Send Message & Empathic Psychologist Simulated Reply
+  // Handle Send Message & Empathic Psychologist Simulated Reply
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
@@ -311,7 +369,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     setInputText('');
 
     // Transmit over WebRTC DataChannel to the connected peer
-    const sentOverP2P = webrtcManagerRef.current?.sendPeerMessage({
+    webrtcManagerRef.current?.sendPeerMessage({
       id: Date.now() + 1,
       sender: mySenderName,
       text: userMsg,
@@ -344,7 +402,65 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     }
   };
 
-  // Download Worksheet Summary as .txt file
+  // Quick Prompt Injector for Psychologist Chat
+  const handleInsertQuickChat = (text) => {
+    setInputText(text);
+  };
+
+  // Save SOAP Notes Handler
+  const handleSaveSoapNotes = (e) => {
+    e.preventDefault();
+    setSoapSavedAlert(true);
+    setTimeout(() => setSoapSavedAlert(false), 3500);
+  };
+
+  // Download Clinical SOAP Notes as .txt file
+  const handleDownloadSoapNotes = () => {
+    const content = `==========================================================
+REKAM MEDIS & CATATAN KLINIS KONSULTASI PSIKOLOGI
+KLINIK TELEMEDIS RUANG JIWA (www.ruangjiwa.id)
+==========================================================
+Psikolog Pemeriksa : ${psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}
+Tanggal Konsultasi : ${new Date().toLocaleDateString('id-ID', { dateStyle: 'full' })}
+Waktu Konsultasi   : ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+ID Sesi Medis      : ${roomId}
+----------------------------------------------------------
+DATA PASIEN:
+Nama Pasien        : ${patientInfo.name} (${patientInfo.age})
+Profesi / Pekerjaan: ${patientInfo.occupation}
+Fokus Keluhan      : ${patientInfo.topic}
+Skrining DASS-21   : ${patientInfo.dassScore}
+Riwayat Konseling  : ${patientInfo.sessionNumber}
+----------------------------------------------------------
+CATATAN KLINIS MODEL SOAP (HIMPSI / STANDAR KLINIS):
+
+[S] SUBJECTIVE (Keluhan Utama & Narasi yang Diungkapkan Pasien):
+${soapNotes.subjective || '(Belum diisi)'}
+
+[O] OBJECTIVE (Observasi Klinis, Afek, Kontak Mata, Bahasa Tubuh):
+${soapNotes.objective || '(Belum diisi)'}
+
+[A] ASSESSMENT (Dinamika Psikologis, Pola Kognitif & Evaluasi):
+${soapNotes.assessment || '(Belum diisi)'}
+
+[P] PLAN (Intervensi Terapeutik, Tugas Rumah & Rencana Lanjutan):
+${soapNotes.plan || '(Belum diisi)'}
+----------------------------------------------------------
+Kerahasiaan data dilindungi kode etik psikologi HIMPSI 
+dan UU No. 27 Tahun 2022 tentang Perlindungan Data Pribadi (PDP).
+==========================================================
+`;
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Rekam_Klinis_SOAP_${patientInfo.name.replace(/\s+/g, '_')}_${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download Worksheet Summary as .txt file (For Client)
   const handleDownloadWorksheet = () => {
     const content = `==========================================================
 RUANG JIWA - CATATAN REFLEKSI & WORKSHEET SESI KONSELING
@@ -376,9 +492,10 @@ Layanan Bantuan WhatsApp: 0811-8777-078
   };
 
   // ============================================================
-  // STAGE 1: VIRTUAL WAITING ROOM (CLIENT LOBBY)
+  // STAGE 1: VIRTUAL WAITING ROOM (CLIENT LOBBY ONLY)
+  // Strict guard: Psychologists NEVER see this screen!
   // ============================================================
-  if (sessionStage === 'waiting_room') {
+  if (sessionStage === 'waiting_room' && currentRole === 'client') {
     return (
       <section className="my-6 max-w-5xl mx-auto px-4 animate-fadeIn">
         {/* Waiting Room Header Card */}
@@ -498,22 +615,18 @@ Layanan Bantuan WhatsApp: 0811-8777-078
 
               {/* Calming Mindfulness Breathing Exercise */}
               <div className="bg-gradient-to-br from-teal-50/70 to-emerald-50/70 border border-teal-200/80 rounded-2xl p-5 text-center space-y-3">
-                <span className="text-[10px] font-bold text-teal-800 bg-teal-100 px-3 py-0.5 rounded-full uppercase tracking-wider">
-                  Mindfulness Pra-Konseling
+                <span className="text-[10px] font-extrabold uppercase text-teal-700 tracking-wider">
+                  Calming Breathing Guide
                 </span>
-                <h4 className="text-sm font-black text-teal-950">
-                  Tarik Napas & Rilekskan Pikiran
-                </h4>
 
-                {/* Breathing Visual Bubble */}
                 <div className="flex flex-col items-center justify-center py-2">
                   <div
-                    className={`w-24 h-24 rounded-full flex items-center justify-center text-white font-extrabold text-xs shadow-lg transition-all duration-1000 ${
+                    className={`w-20 h-20 rounded-full flex items-center justify-center font-bold text-xs text-white shadow-lg transition-all duration-1000 ${
                       mindfulnessPhase === 'inhale'
-                        ? 'bg-gradient-to-r from-teal-500 to-sky-500 scale-115 shadow-teal-200'
+                        ? 'bg-teal-500 scale-125 ring-8 ring-teal-200'
                         : mindfulnessPhase === 'hold'
-                        ? 'bg-gradient-to-r from-sky-600 to-indigo-600 scale-110 shadow-sky-200'
-                        : 'bg-gradient-to-r from-teal-600 to-emerald-600 scale-90 shadow-emerald-200'
+                        ? 'bg-emerald-600 scale-125 ring-8 ring-emerald-300'
+                        : 'bg-sky-500 scale-90 ring-2 ring-sky-200'
                     }`}
                   >
                     {mindfulnessPhase === 'inhale' && 'Tarik Napas'}
@@ -529,13 +642,20 @@ Layanan Bantuan WhatsApp: 0811-8777-078
               </div>
 
               {/* Developer / Testing Simulation Button: Allow client to enter directly if testing solo */}
-              <div className="pt-1">
+              <div className="pt-1 flex items-center gap-2">
                 <button
                   onClick={() => setSessionStage('in_session')}
-                  className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 hover:border-slate-300 text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-2xs"
+                  className="flex-1 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 hover:border-slate-300 text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-2xs"
                 >
                   <span>⚡</span>
-                  <span>Masuk Langsung (Simulasi Psikolog Mengizinkan)</span>
+                  <span>Masuk Langsung (Simulasi)</span>
+                </button>
+                <button
+                  onClick={handleToggleRolePreview}
+                  className="bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
+                  title="Beralih ke tampilan Psikolog Host"
+                >
+                  👨‍⚕️ Mode Psikolog
                 </button>
               </div>
 
@@ -549,19 +669,22 @@ Layanan Bantuan WhatsApp: 0811-8777-078
 
   // ============================================================
   // STAGE 2: ACTIVE IN-SESSION TELEHEALTH ROOM
+  // Tailored for Psychologist (Host) or Client
   // ============================================================
+  const isPsychologistHost = currentRole === 'psychologist';
+
   return (
     <section className="my-6 max-w-7xl mx-auto px-4 animate-fadeIn">
 
-      {/* Host Admission Alert Banner (For Psychologist) */}
-      {isClientWaiting && currentRole === 'psychologist' && (
+      {/* Host Admission Alert Banner (For Psychologist when patient arrives) */}
+      {isClientWaiting && isPsychologistHost && (
         <div className="mb-4 p-4 rounded-3xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 animate-fadeIn">
           <div className="flex items-center gap-3.5">
             <span className="text-3xl animate-bounce">🔔</span>
             <div>
               <h4 className="text-sm font-extrabold text-amber-950">Pasien Telah Tiba di Ruang Tunggu!</h4>
               <p className="text-xs text-amber-800">
-                {waitingClientInfo?.name || 'Klien Ruang Jiwa'} sedang bersiap di lobby virtual. Klik untuk membuka sesi konsultasi.
+                {waitingClientInfo?.name || patientInfo.name} sedang bersiap di lobby virtual. Klik untuk membuka sesi konsultasi.
               </p>
             </div>
           </div>
@@ -602,9 +725,16 @@ Layanan Bantuan WhatsApp: 0811-8777-078
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                Sesi Berlangsung
-              </span>
+              {isPsychologistHost ? (
+                <span className="text-xs font-extrabold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-teal-600 animate-pulse"></span>
+                  Host Praktik Klinis (Psikolog Mitra)
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                  Sesi Pasien Berlangsung
+                </span>
+              )}
               <span className="text-xs text-slate-400 font-semibold">• ID: {roomId}</span>
               {webrtcStatus === 'connected' ? (
                 <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100/80 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
@@ -614,43 +744,55 @@ Layanan Bantuan WhatsApp: 0811-8777-078
               ) : (
                 <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                  WebRTC Siaga (Menunggu Lawan Bicara)
+                  {isPsychologistHost ? 'Siaga Menunggu Pasien' : 'Menunggu Psikolog Terhubung'}
                 </span>
               )}
             </div>
             <h3 className="text-base sm:text-lg font-extrabold text-[#0c2a38] mt-0.5">
-              Konseling Telemedis bersama {psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}
+              {isPsychologistHost 
+                ? `Ruang Konseling Klinis • Pasien: ${waitingClientInfo?.name || patientInfo.name} (${patientInfo.age})` 
+                : `Konseling Telemedis bersama ${psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}`}
             </h3>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* Quick Role Switcher for Testing / Preview */}
+          <button
+            onClick={handleToggleRolePreview}
+            title="Ganti tampilan antara mode Host Psikolog dan Pasien Klien"
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-2xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+          >
+            <span>🔄</span>
+            <span>{isPsychologistHost ? 'Pratinjau Sisi Klien' : 'Mode Psikolog'}</span>
+          </button>
+
           {/* Action to test peer connection in 2nd tab */}
           <button
             onClick={handleOpenPeerTab}
             title="Buka lawan bicara di tab baru untuk mencoba WebRTC P2P langsung"
-            className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold px-3.5 py-2 rounded-2xl transition-all cursor-pointer hover:scale-105 flex items-center gap-1.5 shadow-2xs"
+            className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold px-3 py-2 rounded-2xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
           >
             <span>👥</span>
-            <span>Uji Buka Sisi {currentRole === 'client' ? 'Psikolog' : 'Klien'} (Tab Baru)</span>
+            <span>Uji Buka Sisi {isPsychologistHost ? 'Klien' : 'Psikolog'} (Tab Baru)</span>
           </button>
 
           <button
             onClick={handleCopyRoomLink}
             className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-2xl transition-all cursor-pointer shadow-2xs"
           >
-            {copiedLink ? '✓ Tautan Disalin!' : '📋 Salin Link'}
+            {copiedLink ? '✓ Tautan Disalin!' : (isPsychologistHost ? '📋 Salin Link Pasien' : '📋 Salin Link')}
           </button>
 
           {/* Timer Badge */}
-          <div className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-2xl shadow-inner text-sm font-mono font-bold tracking-wider">
+          <div className="flex items-center gap-2 bg-slate-900 text-white px-3.5 py-2 rounded-2xl shadow-inner text-sm font-mono font-bold tracking-wider">
             <span className="text-rose-400">⏱️</span>
             <span>{formatTime(timeLeft)}</span>
           </div>
 
           <button
             onClick={() => setShowEndModal(true)}
-            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-4 py-2.5 rounded-2xl transition-all cursor-pointer hover:scale-105"
+            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-4 py-2 rounded-2xl transition-all cursor-pointer hover:scale-105"
           >
             Akhiri Sesi
           </button>
@@ -662,9 +804,9 @@ Layanan Bantuan WhatsApp: 0811-8777-078
         
         {/* Left 8 Cols: Video Stream Area */}
         <div className="lg:col-span-8 space-y-4">
-          <div className="relative w-full h-[450px] sm:h-[520px] bg-[#0c2a38] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 flex items-center justify-center group">
+          <div className="relative w-full h-[450px] sm:h-[530px] bg-[#0c2a38] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 flex items-center justify-center group">
             
-            {/* Main Video View: WebRTC Remote Stream OR Standby Preview */}
+            {/* Main Video View: WebRTC Remote Stream OR Dedicated Host/Client Standby Screen */}
             {remoteStream ? (
               <video
                 ref={remoteVideoRef}
@@ -672,7 +814,76 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                 playsInline
                 className="w-full h-full object-cover"
               />
+            ) : isPsychologistHost ? (
+              /* PSYCHOLOGIST HOST STANDBY SCREEN (Never show psychologist's own picture as their client!) */
+              <div className="w-full h-full bg-gradient-to-b from-[#0e2c3b] to-[#081922] flex flex-col items-center justify-center p-6 text-center text-white space-y-4 relative">
+                
+                <div className="relative">
+                  <div className="w-20 h-20 rounded-3xl bg-teal-500/15 border-2 border-teal-400/30 flex items-center justify-center text-3xl shadow-2xl animate-pulse">
+                    👨‍⚕️
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-emerald-500 rounded-full border-2 border-[#0e2c3b] flex items-center justify-center text-xs text-white font-bold shadow-md">
+                    ✓
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 max-w-md">
+                  <span className="text-[10px] font-extrabold text-teal-300 uppercase tracking-wider bg-teal-900/60 px-3 py-1 rounded-full border border-teal-500/30">
+                    Ruang Telekonseling Siaga (Host Aktif)
+                  </span>
+                  <h4 className="text-lg sm:text-xl font-black text-white pt-1">
+                    Menunggu Pasien Masuk ke Ruang Sesi
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Kamera dan audio Anda siap. Saat pasien bergabung di lobi virtual, notifikasi penerimaan pasien akan muncul otomatis.
+                  </p>
+                </div>
+
+                {isClientWaiting ? (
+                  <div className="p-4 rounded-2xl bg-amber-500/20 border-2 border-amber-400 max-w-sm w-full space-y-2.5 animate-bounce shadow-xl">
+                    <p className="text-xs font-black text-amber-200 flex items-center justify-center gap-1.5">
+                      <span>🔔</span>
+                      <span>Pasien {waitingClientInfo?.name || patientInfo.name} telah di lobi!</span>
+                    </p>
+                    <button
+                      onClick={handleAdmitClient}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs py-2.5 rounded-xl shadow-lg transition-all cursor-pointer hover:scale-102 flex items-center justify-center gap-2"
+                    >
+                      <span>🚪</span>
+                      <span>Izinkan Pasien Masuk Sekarang</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
+                    <button
+                      onClick={handleCopyRoomLink}
+                      className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-white/20 transition-all cursor-pointer flex items-center gap-2"
+                    >
+                      <span>📋</span>
+                      <span>{copiedLink ? 'Tautan Pasien Disalin!' : 'Salin Tautan Pasien'}</span>
+                    </button>
+                    <button
+                      onClick={handleOpenPeerTab}
+                      className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                    >
+                      <span>👥</span>
+                      <span>Buka Tab Pasien (Uji Coba)</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Patient summary badge at bottom */}
+                <div className="pt-2 text-[11px] text-slate-400 flex items-center gap-2 flex-wrap justify-center">
+                  <span>Pasien: <strong className="text-teal-200">{patientInfo.name}</strong></span>
+                  <span>•</span>
+                  <span>{patientInfo.sessionNumber}</span>
+                  <span>•</span>
+                  <span className="text-amber-300 font-semibold">{patientInfo.dassScore}</span>
+                </div>
+
+              </div>
             ) : (
+              /* CLIENT VIEW: Shows Psychologist's Avatar while waiting for video stream */
               <img
                 src={psychologist?.avatar || '/assets/psychologist_cliff_tedyanto.jpg'}
                 alt={psychologist?.name || 'Psikolog'}
@@ -687,17 +898,19 @@ Layanan Bantuan WhatsApp: 0811-8777-078
             <div className="absolute top-4 left-4 flex items-center gap-2.5 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/20 shadow-lg text-white">
               <span className={`w-2.5 h-2.5 rounded-full ${remoteStream ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
               <span className="text-xs font-extrabold">
-                {currentRole === 'client' ? (psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog') : 'Klien Ruang Jiwa'}
+                {isPsychologistHost
+                  ? (remoteStream ? `${waitingClientInfo?.name || patientInfo.name} (Pasien)` : 'Layar Pasien (Standby)')
+                  : (psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog')}
               </span>
               <span className="text-[10px] text-sky-300 font-semibold bg-white/10 px-2 py-0.5 rounded-md">
-                {remoteStream ? 'WebRTC Live' : 'Host'}
+                {remoteStream ? 'WebRTC Live' : (isPsychologistHost ? 'Pasien' : 'Host')}
               </span>
             </div>
 
-            {/* Client Mini Picture-in-Picture (PiP) Webcam Stream */}
+            {/* Picture-in-Picture (PiP) Local Webcam Stream */}
             <div className="absolute top-4 right-4 w-36 h-48 sm:w-44 sm:h-56 rounded-2xl bg-slate-950 border-2 border-white/80 shadow-2xl overflow-hidden flex flex-col justify-between p-2.5 z-20">
               
-              {/* Actual Video Tag for Client Webcam */}
+              {/* Actual Video Tag for User Webcam */}
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -722,7 +935,7 @@ Layanan Bantuan WhatsApp: 0811-8777-078
               {/* PiP Top Badge */}
               <div className="relative z-10 flex items-center justify-between">
                 <span className="bg-slate-900/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-md border border-white/20">
-                  Anda ({currentRole === 'psychologist' ? 'Psikolog' : 'Klien'})
+                  {isPsychologistHost ? 'Anda (Psikolog - Host)' : 'Anda (Klien)'}
                 </span>
                 {isMuted && (
                   <span className="bg-rose-600 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">
@@ -792,34 +1005,259 @@ Layanan Bantuan WhatsApp: 0811-8777-078
 
         </div>
 
-        {/* Right 4 Cols: Interactive Panel (Chat & Worksheet Tab) */}
-        <div className="lg:col-span-4 bg-white rounded-3xl border border-slate-200 shadow-lg flex flex-col h-[450px] sm:h-[520px] overflow-hidden">
+        {/* Right 4 Cols: Interactive Clinical / Client Panel */}
+        <div className="lg:col-span-4 bg-white rounded-3xl border border-slate-200 shadow-lg flex flex-col h-[450px] sm:h-[530px] overflow-hidden">
           
           {/* Side Panel Tabs Header */}
-          <div className="flex items-center border-b border-slate-100 p-2 bg-slate-50/80">
-            <button
-              onClick={() => setActiveSideTab('chat')}
-              className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeSideTab === 'chat'
-                  ? 'bg-white text-sky-800 shadow-sm border border-slate-200/80'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              💬 Chat Terenkripsi
-            </button>
-            <button
-              onClick={() => setActiveSideTab('worksheet')}
-              className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeSideTab === 'worksheet'
-                  ? 'bg-white text-teal-800 shadow-sm border border-slate-200/80'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              📝 Worksheet Sesi
-            </button>
+          <div className="flex items-center border-b border-slate-100 p-2 bg-slate-50/80 gap-1">
+            {isPsychologistHost ? (
+              /* PSYCHOLOGIST CLINICAL TABS */
+              <>
+                <button
+                  onClick={() => setActiveSideTab('soap')}
+                  className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    activeSideTab === 'soap'
+                      ? 'bg-white text-teal-800 shadow-sm border border-slate-200/80'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  📋 Catatan SOAP
+                </button>
+                <button
+                  onClick={() => setActiveSideTab('intake')}
+                  className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    activeSideTab === 'intake'
+                      ? 'bg-white text-sky-800 shadow-sm border border-slate-200/80'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  📊 Asesmen Pasien
+                </button>
+                <button
+                  onClick={() => setActiveSideTab('chat')}
+                  className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    activeSideTab === 'chat'
+                      ? 'bg-white text-teal-800 shadow-sm border border-slate-200/80'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  💬 Chat
+                </button>
+              </>
+            ) : (
+              /* CLIENT TABS */
+              <>
+                <button
+                  onClick={() => setActiveSideTab('chat')}
+                  className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    activeSideTab === 'chat'
+                      ? 'bg-white text-sky-800 shadow-sm border border-slate-200/80'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  💬 Chat Terenkripsi
+                </button>
+                <button
+                  onClick={() => setActiveSideTab('worksheet')}
+                  className={`flex-1 py-2 text-xs font-extrabold rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    activeSideTab === 'worksheet'
+                      ? 'bg-white text-teal-800 shadow-sm border border-slate-200/80'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  📝 Worksheet Sesi
+                </button>
+              </>
+            )}
           </div>
 
-          {/* TAB 1: CHAT ENKRIPSI */}
+          {/* PSYCHOLOGIST TAB 1: REKAM MEDIS & CATATAN KLINIS (SOAP) */}
+          {isPsychologistHost && activeSideTab === 'soap' && (
+            <div className="flex-1 flex flex-col justify-between p-4 overflow-y-auto space-y-3.5 text-xs">
+              
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase text-teal-700 bg-teal-50 px-2.5 py-0.5 rounded-md border border-teal-200">
+                    Standar HIMPSI • Rekam Klinis SOAP
+                  </span>
+                  <span className="text-[10px] text-slate-400">Auto-Save Aktif</span>
+                </div>
+                <h4 className="font-extrabold text-[#0c2a38] text-sm mt-1">
+                  Catatan Kasus Pasien: {patientInfo.name}
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Tersinkronisasi dengan portal praktik pribadi Anda.
+                </p>
+              </div>
+
+              {soapSavedAlert && (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold flex items-center gap-1.5 animate-fadeIn">
+                  <span>✓</span>
+                  <span>Catatan SOAP berhasil disimpan ke database rekam medis!</span>
+                </div>
+              )}
+
+              {/* S: Subjective */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 text-[11px] flex items-center gap-1">
+                  <span className="w-4 h-4 rounded-full bg-teal-100 text-teal-800 flex items-center justify-center text-[9px] font-black">S</span>
+                  <span>Subjective (Keluhan Utama & Narasi Klien):</span>
+                </label>
+                <textarea
+                  rows="2"
+                  value={soapNotes.subjective}
+                  onChange={(e) => setSoapNotes({ ...soapNotes, subjective: e.target.value })}
+                  placeholder="Keluhan yang diungkapkan verbal oleh pasien..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              {/* O: Objective */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 text-[11px] flex items-center gap-1">
+                  <span className="w-4 h-4 rounded-full bg-sky-100 text-sky-800 flex items-center justify-center text-[9px] font-black">O</span>
+                  <span>Objective (Observasi Afek, Kontak Mata & Postur):</span>
+                </label>
+                <textarea
+                  rows="2"
+                  value={soapNotes.objective}
+                  onChange={(e) => setSoapNotes({ ...soapNotes, objective: e.target.value })}
+                  placeholder="Observasi perilaku, afek, kontak mata, intonasi..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              {/* A: Assessment */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 text-[11px] flex items-center gap-1">
+                  <span className="w-4 h-4 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center text-[9px] font-black">A</span>
+                  <span>Assessment (Dinamika Psikologis & Hipotesis):</span>
+                </label>
+                <textarea
+                  rows="2"
+                  value={soapNotes.assessment}
+                  onChange={(e) => setSoapNotes({ ...soapNotes, assessment: e.target.value })}
+                  placeholder="Dinamika psikologis, distorsi kognitif, evaluasi DASS-21..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              {/* P: Plan */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 text-[11px] flex items-center gap-1">
+                  <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-800 flex items-center justify-center text-[9px] font-black">P</span>
+                  <span>Plan (Intervensi CBT, PR / Homework, Tindak Lanjut):</span>
+                </label>
+                <textarea
+                  rows="2"
+                  value={soapNotes.plan}
+                  onChange={(e) => setSoapNotes({ ...soapNotes, plan: e.target.value })}
+                  placeholder="Tugas refleksi, restrukturisasi kognitif, follow-up..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-teal-500 focus:outline-hidden"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  onClick={handleSaveSoapNotes}
+                  className="flex-1 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-extrabold py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <span>💾</span>
+                  <span>Simpan Rekam Medis</span>
+                </button>
+                <button
+                  onClick={handleDownloadSoapNotes}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2.5 rounded-xl transition-all cursor-pointer"
+                  title="Unduh Lembar SOAP (.txt)"
+                >
+                  📥 Unduh
+                </button>
+              </div>
+
+            </div>
+          )}
+
+          {/* PSYCHOLOGIST TAB 2: INTAKE & ASESMEN PASIEN */}
+          {isPsychologistHost && activeSideTab === 'intake' && (
+            <div className="flex-1 flex flex-col justify-between p-4 overflow-y-auto space-y-3.5 text-xs">
+              
+              <div className="space-y-1">
+                <span className="text-[10px] font-extrabold uppercase text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-md border border-sky-200">
+                  Data Intake Pasien
+                </span>
+                <h4 className="font-extrabold text-[#0c2a38] text-sm">
+                  {patientInfo.name} ({patientInfo.age})
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Profesi: {patientInfo.occupation} • {patientInfo.sessionNumber}
+                </p>
+              </div>
+
+              {/* DASS-21 Screening Results */}
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2.5">
+                <span className="text-[11px] font-extrabold text-slate-700 block">
+                  Hasil Skrining Awal (DASS-21):
+                </span>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-white p-2 rounded-xl border border-slate-100 shadow-2xs">
+                    <span className="text-[10px] text-slate-400 block font-semibold">Depresi</span>
+                    <span className="text-sm font-black text-emerald-600">
+                      {patientInfo.dassDetail.depression}/21
+                    </span>
+                    <span className="text-[9px] text-emerald-700 font-bold block">Normal</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-amber-200 shadow-2xs">
+                    <span className="text-[10px] text-slate-400 block font-semibold">Ansietas</span>
+                    <span className="text-sm font-black text-amber-600">
+                      {patientInfo.dassDetail.anxiety}/21
+                    </span>
+                    <span className="text-[9px] text-amber-700 font-bold block">Sedang</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-slate-100 shadow-2xs">
+                    <span className="text-[10px] text-slate-400 block font-semibold">Stres</span>
+                    <span className="text-sm font-black text-slate-700">
+                      {patientInfo.dassDetail.stress}/21
+                    </span>
+                    <span className="text-[9px] text-slate-500 font-bold block">Ringan</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Topic / Chief Complaint */}
+              <div className="space-y-1 bg-amber-50/70 p-3 rounded-2xl border border-amber-200/80">
+                <span className="text-[10px] font-extrabold text-amber-900 uppercase">
+                  Fokus Keluhan Pasien:
+                </span>
+                <p className="text-xs text-slate-800 leading-relaxed font-medium">
+                  "{patientInfo.topic}"
+                </p>
+              </div>
+
+              {/* Previous Session History */}
+              <div className="space-y-1 bg-sky-50/60 p-3 rounded-2xl border border-sky-100">
+                <span className="text-[10px] font-extrabold text-sky-900 uppercase">
+                  Catatan Sesi Sebelumnya (28 Agustus 2026):
+                </span>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Psikoedukasi pola fight-or-flight dan latihan pernapasan diafragma. Klien melaporkan frekuensi insomnia berkurang dari 5x menjadi 2x seminggu.
+                </p>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="pt-2">
+                <button
+                  onClick={() => setActiveSideTab('soap')}
+                  className="w-full bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold py-2.5 rounded-xl transition-all cursor-pointer text-center"
+                >
+                  📝 Buka Formulir SOAP untuk Sesi Ini →
+                </button>
+              </div>
+
+            </div>
+          )}
+
+          {/* COMMON TAB: ENCRYPTED CHAT */}
           {activeSideTab === 'chat' && (
             <div className="flex-1 flex flex-col justify-between p-4 overflow-hidden">
               
@@ -841,7 +1279,7 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                   return (
                     <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       <span className="text-[10px] text-slate-400 font-medium mb-1 px-1">
-                        {isMe ? 'Anda' : (psychologist?.name?.split(',')[0] || 'Psikolog')} • {msg.time}
+                        {isMe ? 'Anda' : (isPsychologistHost ? patientInfo.name : (psychologist?.name?.split(',')[0] || 'Psikolog'))} • {msg.time}
                       </span>
                       <div
                         className={`max-w-[85%] p-3 rounded-2xl leading-relaxed shadow-xs ${
@@ -856,26 +1294,50 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                   );
                 })}
 
-                {/* Psychologist Typing Indicator */}
+                {/* Typing Indicator */}
                 {isPsychologistTyping && (
                   <div className="flex items-center gap-1.5 text-slate-400 text-xs italic pl-2 py-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-bounce"></span>
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-bounce delay-100"></span>
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-bounce delay-200"></span>
-                    <span className="text-[11px] ml-1">Psikolog sedang mengetik respons...</span>
+                    <span className="text-[11px] ml-1">Mengetik respons...</span>
                   </div>
                 )}
 
                 <div ref={chatBottomRef} />
               </div>
 
+              {/* Quick Prompt Pills for Psychologist */}
+              {isPsychologistHost && (
+                <div className="py-2 flex items-center gap-1.5 overflow-x-auto text-[10px] border-t border-slate-100">
+                  <button
+                    onClick={() => handleInsertQuickChat('Tarik napas perlahan dan hembuskan dengan tenang...')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded-lg whitespace-nowrap cursor-pointer transition-colors"
+                  >
+                    🌬️ Tarik napas...
+                  </button>
+                  <button
+                    onClick={() => handleInsertQuickChat('Apakah ada sensasi fisik di tubuh yang dirasakan saat ini?')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded-lg whitespace-nowrap cursor-pointer transition-colors"
+                  >
+                    💭 Sensasi fisik
+                  </button>
+                  <button
+                    onClick={() => handleInsertQuickChat('Mari kita eksplorasi bersama pemicu utama pikiran tersebut.')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded-lg whitespace-nowrap cursor-pointer transition-colors"
+                  >
+                    🔍 Pemicu utama
+                  </button>
+                </div>
+              )}
+
               {/* Chat Input Form */}
-              <form onSubmit={handleSendMessage} className="pt-3 border-t border-slate-100 flex items-center gap-2">
+              <form onSubmit={handleSendMessage} className="pt-2 border-t border-slate-100 flex items-center gap-2">
                 <input
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Ketik pesan atau pertanyaan..."
+                  placeholder={isPsychologistHost ? "Ketik catatan pesan ke pasien..." : "Ketik pesan atau pertanyaan..."}
                   className="flex-1 text-xs px-3.5 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 focus:outline-hidden focus:border-sky-500 focus:bg-white transition-all text-slate-800"
                 />
                 <button
@@ -890,8 +1352,8 @@ Layanan Bantuan WhatsApp: 0811-8777-078
             </div>
           )}
 
-          {/* TAB 2: WORKSHEET & CATATAN REFLEKSI */}
-          {activeSideTab === 'worksheet' && (
+          {/* CLIENT TAB: WORKSHEET & CATATAN REFLEKSI */}
+          {!isPsychologistHost && activeSideTab === 'worksheet' && (
             <div className="flex-1 flex flex-col justify-between p-4 overflow-y-auto space-y-3.5 text-xs">
               <div>
                 <span className="text-[10px] font-bold uppercase text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200">
@@ -968,37 +1430,48 @@ Layanan Bantuan WhatsApp: 0811-8777-078
 
             <div className="space-y-1.5">
               <h3 className="text-xl font-extrabold text-[#0c2a38]">
-                Sesi Konseling Selesai
+                {isPsychologistHost ? 'Sesi Konseling Selesai' : 'Sesi Konseling Selesai'}
               </h3>
               <p className="text-xs text-slate-500">
-                Terima kasih telah mengambil langkah berani untuk merawat kesehatan jiwamu hari ini bersama {psychologist?.name || 'Psikolog Mitra'}.
+                {isPsychologistHost 
+                  ? 'Terima kasih atas dedikasi Anda mendampingi pemulihan kesehatan jiwa pasien hari ini.'
+                  : `Terima kasih telah mengambil langkah berani untuk merawat kesehatan jiwamu hari ini bersama ${psychologist?.name || 'Psikolog Mitra'}.`}
               </p>
             </div>
 
-            {/* Star Rating */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-700">Bagaimana kenyamanan sesi hari ini?</span>
-              <div className="flex items-center justify-center gap-2">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    onClick={() => setRating(star)}
-                    className="text-2xl hover:scale-125 transition-transform cursor-pointer"
-                  >
-                    {star <= rating ? '⭐' : '☆'}
-                  </button>
-                ))}
+            {/* Star Rating (For Client) or Session Status (For Psychologist) */}
+            {!isPsychologistHost ? (
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-slate-700">Bagaimana kenyamanan sesi hari ini?</span>
+                <div className="flex items-center justify-center gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setRating(star)}
+                      className="text-2xl hover:scale-125 transition-transform cursor-pointer"
+                    >
+                      {star <= rating ? '⭐' : '☆'}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-left text-xs space-y-1.5">
+                <span className="font-bold text-slate-700 block">Status Rekam Kasus:</span>
+                <p className="text-[11px] text-slate-500">Catatan SOAP sesi ini telah tersimpan dalam rekam medis portal praktisi.</p>
+              </div>
+            )}
 
             {/* Optional Feedback */}
-            <textarea
-              rows="2"
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Catatan tambahan atau apresiasi untuk psikolog (opsional)..."
-              className="w-full text-xs p-3 rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-sky-500 focus:outline-hidden"
-            />
+            {!isPsychologistHost && (
+              <textarea
+                rows="2"
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Catatan tambahan atau apresiasi untuk psikolog (opsional)..."
+                className="w-full text-xs p-3 rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-sky-500 focus:outline-hidden"
+              />
+            )}
 
             {/* Actions */}
             <div className="flex items-center gap-3">
