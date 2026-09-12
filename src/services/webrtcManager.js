@@ -1,255 +1,297 @@
-// WebRTC Peer-to-Peer Manager for Ruang Jiwa Telehealth
-// Supports STUN Server ICE Candidates, BroadcastChannel signaling for multi-tab/browser testing,
-// and RTCDataChannel for real-time encrypted messaging.
+// WebRTC Hybrid Peer-to-Peer & Online Cloud Signaling Manager for Ruang Jiwa
+// Uses PeerJS Cloud Signaling (Public Cloud Broker on 0.peerjs.com via WSS) for
+// cross-device & cross-network internet calls (e.g. Phone to Laptop),
+// combined with BroadcastChannel for zero-latency same-machine testing.
 
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
-  ]
-};
+import { Peer } from 'peerjs';
 
 export class WebRTCManager {
   constructor({ roomId, role, onRemoteStream, onConnectionState, onChatMessage }) {
     this.roomId = roomId || 'RJ-8821940';
-    this.role = role || 'client'; // 'client' or 'psychologist'
-    this.peerId = `${this.role}_${Math.random().toString(36).substring(2, 7)}`;
+    this.role = role || 'client'; // 'client' | 'psychologist'
     this.onRemoteStream = onRemoteStream;
     this.onConnectionState = onConnectionState;
     this.onChatMessage = onChatMessage;
 
-    this.peerConnection = null;
-    this.dataChannel = null;
     this.localStream = null;
-    this.signalingChannel = null;
-    this.isInitiator = this.role === 'client';
+    this.remoteStream = null;
+    this.peer = null;
+    this.activeCall = null;
+    this.dataConnection = null;
     this.isConnected = false;
+    this.retryInterval = null;
 
-    this.initSignaling();
+    // Standard predictable peer IDs based on clean room name
+    const cleanRoom = this.roomId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    this.myPeerId = this.role === 'psychologist' 
+      ? `rj-${cleanRoom}-psy` 
+      : `rj-${cleanRoom}-client`;
+    this.targetPeerId = this.role === 'psychologist' 
+      ? `rj-${cleanRoom}-client` 
+      : `rj-${cleanRoom}-psy`;
+
+    // Local BroadcastChannel for instant same-browser fallback
+    this.initBroadcastSignaling();
   }
 
-  // Initialize browser-based signaling (BroadcastChannel & localStorage fallback)
-  initSignaling() {
+  initBroadcastSignaling() {
     try {
-      this.signalingChannel = new BroadcastChannel(`ruangjiwa_webrtc_${this.roomId}`);
-      this.signalingChannel.onmessage = (event) => this.handleSignalingData(event.data);
-    } catch (e) {
-      console.warn('BroadcastChannel not supported, using fallback event listener', e);
-    }
-  }
+      this.localBc = new BroadcastChannel(`ruangjiwa_bc_${this.roomId}`);
+      this.localBc.onmessage = (event) => {
+        const data = event.data;
+        if (!data || data.senderRole === this.role) return;
 
-  // Broadcast signaling messages (Offer, Answer, ICE Candidate)
-  sendSignaling(data) {
-    const payload = {
-      ...data,
-      senderId: this.peerId,
-      senderRole: this.role,
-      roomId: this.roomId
-    };
-
-    if (this.signalingChannel) {
-      this.signalingChannel.postMessage(payload);
-    }
-  }
-
-  // Handle incoming signaling messages from peer
-  async handleSignalingData(msg) {
-    if (!msg || msg.senderId === this.peerId || msg.roomId !== this.roomId) return;
-
-    try {
-      if (msg.type === 'peer_joined') {
-        // A new peer entered the room
-        console.log(`[WebRTC] Peer bergabung: ${msg.senderRole} (${msg.senderId})`);
-        if (this.role === 'client' && this.localStream) {
-          // Client creates Offer
-          await this.createOffer();
+        if (data.type === 'peer_online' && this.localStream && !this.isConnected) {
+          console.log('[WebRTC Hybrid] Local peer detected, initiating call to:', this.targetPeerId);
+          this.callTargetPeer();
+        } else if (data.type === 'chat_msg') {
+          if (this.onChatMessage) this.onChatMessage(data.payload);
         }
-      } else if (msg.type === 'offer') {
-        console.log('[WebRTC] Menerima Offer dari peer');
-        await this.handleOffer(msg.offer);
-      } else if (msg.type === 'answer') {
-        console.log('[WebRTC] Menerima Answer dari peer');
-        await this.handleAnswer(msg.answer);
-      } else if (msg.type === 'ice-candidate') {
-        if (this.peerConnection && msg.candidate) {
-          await this.peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
-        }
-      } else if (msg.type === 'peer_left') {
-        this.handlePeerDisconnected();
-      }
+      };
     } catch (err) {
-      console.error('[WebRTC Signaling Error]', err);
+      console.warn('BroadcastChannel not supported:', err);
     }
   }
 
-  // Start WebRTC connection with a local media stream
+  // Start WebRTC session with local media stream
   async start(localStream) {
     this.localStream = localStream;
-    this.setupPeerConnection();
+    this.initPeerJS();
 
-    // Broadcast that this peer has joined the room
-    this.sendSignaling({ type: 'peer_joined' });
-
-    // If client, check if psychologist is already waiting or start negotiation
-    if (this.role === 'client') {
-      setTimeout(() => {
-        this.createOffer();
-      }, 800);
+    // Broadcast presence locally as well
+    if (this.localBc) {
+      this.localBc.postMessage({ type: 'peer_online', senderRole: this.role });
     }
   }
 
-  setupPeerConnection() {
-    if (this.peerConnection) return;
+  // Initialize PeerJS Cloud Connection (WSS)
+  initPeerJS() {
+    try {
+      const peerConfig = {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      };
 
-    this.peerConnection = new RTCPeerConnection(ICE_SERVERS);
+      // Create Peer with primary ID, or fallback if ID occupied
+      this.peer = new Peer(this.myPeerId, peerConfig);
 
-    // Add local tracks to peer connection
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => {
-        this.peerConnection.addTrack(track, this.localStream);
+      this.peer.on('open', (id) => {
+        console.log(`[WebRTC Cloud] Online PeerJS ID Terdaftar: ${id}`);
+        this.startCallingLoop();
       });
+
+      // Handle Incoming Call from remote peer
+      this.peer.on('call', (call) => {
+        console.log('[WebRTC Cloud] Menerima panggilan video masuk dari:', call.peer);
+        this.activeCall = call;
+
+        // Answer with local media stream
+        call.answer(this.localStream);
+
+        call.on('stream', (remoteMediaStream) => {
+          console.log('[WebRTC Cloud] Remote Stream Video/Audio diterima!');
+          this.handleConnectedStream(remoteMediaStream);
+        });
+
+        call.on('close', () => {
+          this.handleDisconnected();
+        });
+
+        call.on('error', (err) => {
+          console.error('[WebRTC Call Error]', err);
+        });
+      });
+
+      // Handle Incoming Data Connection for Chat
+      this.peer.on('connection', (conn) => {
+        console.log('[WebRTC Cloud] Saluran Chat Data terhubung dari:', conn.peer);
+        this.setupDataConnection(conn);
+      });
+
+      // Handle Peer Errors (e.g. ID already taken upon fast refresh)
+      this.peer.on('error', (err) => {
+        console.warn('[WebRTC Peer Warning]', err.type, err.message);
+        if (err.type === 'unavailable-id') {
+          // Retry with alternative suffix
+          const fallbackId = `${this.myPeerId}-${Math.floor(1000 + Math.random() * 9000)}`;
+          console.log(`[WebRTC] ID utama sibuk, mencoba ID alternatif: ${fallbackId}`);
+          this.peer.destroy();
+          this.peer = new Peer(fallbackId, peerConfig);
+          this.peer.on('open', () => this.startCallingLoop());
+        }
+      });
+
+      this.peer.on('disconnected', () => {
+        console.log('[WebRTC Cloud] Koneksi ke signaling broker terputus, mencoba reconnect...');
+        this.peer.reconnect();
+      });
+
+    } catch (err) {
+      console.error('[WebRTC Cloud Init Error]', err);
     }
+  }
 
-    // Remote stream event
-    this.peerConnection.ontrack = (event) => {
-      console.log('[WebRTC] Remote stream received:', event.streams[0]);
-      if (this.onRemoteStream && event.streams && event.streams[0]) {
-        this.onRemoteStream(event.streams[0]);
-      }
-    };
+  // Periodic heartbeat / call attempt until target peer answers
+  startCallingLoop() {
+    this.callTargetPeer();
 
-    // ICE Candidate generation
-    this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.sendSignaling({
-          type: 'ice-candidate',
-          candidate: event.candidate
+    if (!this.retryInterval) {
+      this.retryInterval = setInterval(() => {
+        if (!this.isConnected && this.localStream) {
+          this.callTargetPeer();
+        }
+      }, 3500);
+    }
+  }
+
+  // Call the counterpart (Client calls Psychologist, or Psychologist calls Client)
+  callTargetPeer() {
+    if (!this.peer || this.peer.destroyed || !this.localStream || this.isConnected) return;
+
+    try {
+      console.log(`[WebRTC Cloud] Menghubungi lawan bicara (${this.targetPeerId})...`);
+      
+      // 1. Establish Audio/Video Call
+      const call = this.peer.call(this.targetPeerId, this.localStream);
+      if (call) {
+        this.activeCall = call;
+
+        call.on('stream', (remoteMediaStream) => {
+          console.log('[WebRTC Cloud] Remote stream diterima dari panggilan keluar!');
+          this.handleConnectedStream(remoteMediaStream);
+        });
+
+        call.on('close', () => {
+          this.handleDisconnected();
+        });
+
+        call.on('error', (err) => {
+          // Expected when target peer hasn't opened page yet
         });
       }
-    };
 
-    // Connection state monitoring
-    this.peerConnection.onconnectionstatechange = () => {
-      const state = this.peerConnection.connectionState;
-      console.log('[WebRTC] Connection state:', state);
-      this.isConnected = state === 'connected';
-      if (this.onConnectionState) {
-        this.onConnectionState(state);
+      // 2. Establish Data Channel for instant P2P Chat
+      if (!this.dataConnection || !this.dataConnection.open) {
+        const conn = this.peer.connect(this.targetPeerId, { reliable: true });
+        this.setupDataConnection(conn);
       }
-    };
 
-    // Setup DataChannel for instant P2P encrypted chat
-    if (this.role === 'client') {
-      this.dataChannel = this.peerConnection.createDataChannel('ruangjiwa_chat', {
-        ordered: true
-      });
-      this.setupDataChannelListeners(this.dataChannel);
-    } else {
-      this.peerConnection.ondatachannel = (event) => {
-        this.dataChannel = event.channel;
-        this.setupDataChannelListeners(this.dataChannel);
-      };
+    } catch (err) {
+      // Peer not online yet
     }
   }
 
-  setupDataChannelListeners(channel) {
-    if (!channel) return;
-    channel.onopen = () => {
-      console.log('[WebRTC DataChannel] Saluran chat P2P terhubung!');
-    };
-    channel.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data);
-        if (this.onChatMessage) {
-          this.onChatMessage(parsed);
-        }
-      } catch (err) {
-        console.warn('Failed to parse WebRTC DataChannel message:', err);
+  setupDataConnection(conn) {
+    this.dataConnection = conn;
+
+    conn.on('open', () => {
+      console.log('[WebRTC Chat DataChannel] Saluran chat online siap!');
+    });
+
+    conn.on('data', (data) => {
+      if (this.onChatMessage) {
+        this.onChatMessage(data);
       }
-    };
+    });
+
+    conn.on('close', () => {
+      this.dataConnection = null;
+    });
   }
 
-  // Create & Send SDP Offer
-  async createOffer() {
-    if (!this.peerConnection) this.setupPeerConnection();
+  handleConnectedStream(stream) {
+    this.remoteStream = stream;
+    this.isConnected = true;
 
-    try {
-      const offer = await this.peerConnection.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true
-      });
-      await this.peerConnection.setLocalDescription(offer);
-      this.sendSignaling({
-        type: 'offer',
-        offer: offer
-      });
-    } catch (err) {
-      console.error('[WebRTC] Gagal membuat Offer:', err);
+    if (this.retryInterval) {
+      clearInterval(this.retryInterval);
+      this.retryInterval = null;
+    }
+
+    if (this.onRemoteStream) {
+      this.onRemoteStream(stream);
+    }
+
+    if (this.onConnectionState) {
+      this.onConnectionState('connected');
     }
   }
 
-  // Handle incoming Offer & Send SDP Answer
-  async handleOffer(offer) {
-    if (!this.peerConnection) this.setupPeerConnection();
-
-    try {
-      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await this.peerConnection.createAnswer();
-      await this.peerConnection.setLocalDescription(answer);
-      this.sendSignaling({
-        type: 'answer',
-        answer: answer
-      });
-    } catch (err) {
-      console.error('[WebRTC] Gagal menangani Offer:', err);
-    }
-  }
-
-  // Handle incoming Answer
-  async handleAnswer(answer) {
-    try {
-      if (this.peerConnection) {
-        await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-      }
-    } catch (err) {
-      console.error('[WebRTC] Gagal menangani Answer:', err);
-    }
-  }
-
-  // Send real-time P2P chat message over DataChannel
-  sendPeerMessage(msgObj) {
-    if (this.dataChannel && this.dataChannel.readyState === 'open') {
-      this.dataChannel.send(JSON.stringify(msgObj));
-      return true;
-    }
-    return false;
-  }
-
-  handlePeerDisconnected() {
+  handleDisconnected() {
     this.isConnected = false;
+    this.remoteStream = null;
+
     if (this.onConnectionState) {
       this.onConnectionState('disconnected');
     }
+
+    // Resume listening and trying to reconnect
+    this.startCallingLoop();
   }
 
-  // Close and cleanup WebRTC connection
+  // Send Chat message across devices via WebRTC DataChannel & BroadcastChannel
+  sendPeerMessage(msgObj) {
+    let sent = false;
+
+    // 1. Send via PeerJS Cloud DataConnection
+    if (this.dataConnection && this.dataConnection.open) {
+      try {
+        this.dataConnection.send(msgObj);
+        sent = true;
+      } catch (err) {
+        console.warn('Gagal kirim via DataConnection:', err);
+      }
+    }
+
+    // 2. Also send via BroadcastChannel for same-machine tabs
+    if (this.localBc) {
+      try {
+        this.localBc.postMessage({
+          type: 'chat_msg',
+          senderRole: this.role,
+          payload: msgObj
+        });
+        sent = true;
+      } catch (e) {
+        // Ignore
+      }
+    }
+
+    return sent;
+  }
+
+  // Close and clean up all connections
   close() {
-    this.sendSignaling({ type: 'peer_left' });
-
-    if (this.dataChannel) {
-      this.dataChannel.close();
-      this.dataChannel = null;
+    if (this.retryInterval) {
+      clearInterval(this.retryInterval);
+      this.retryInterval = null;
     }
 
-    if (this.peerConnection) {
-      this.peerConnection.close();
-      this.peerConnection = null;
+    if (this.activeCall) {
+      this.activeCall.close();
+      this.activeCall = null;
     }
 
-    if (this.signalingChannel) {
-      this.signalingChannel.close();
-      this.signalingChannel = null;
+    if (this.dataConnection) {
+      this.dataConnection.close();
+      this.dataConnection = null;
+    }
+
+    if (this.peer) {
+      this.peer.destroy();
+      this.peer = null;
+    }
+
+    if (this.localBc) {
+      this.localBc.close();
+      this.localBc = null;
     }
 
     this.isConnected = false;
