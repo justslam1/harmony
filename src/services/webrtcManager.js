@@ -1,9 +1,11 @@
 // WebRTC Hybrid Peer-to-Peer & Online Cloud Signaling Manager for Ruang Jiwa
 // Uses PeerJS Cloud Signaling (Public Cloud Broker on 0.peerjs.com via WSS) for
 // cross-device & cross-network internet calls (e.g. Phone to Laptop),
-// combined with BroadcastChannel for zero-latency same-machine testing.
+// combined with BroadcastChannel for zero-latency same-machine testing,
+// and Universal Cloud Signaling (SSE + HTTP) for guaranteed cross-device synchronization.
 
 import { Peer } from 'peerjs';
+import { publishCloudEvent, subscribeCloudEvents } from './cloudSignaling';
 
 export class WebRTCManager {
   constructor({ roomId, role, onRemoteStream, onConnectionState, onChatMessage, onClientWaiting, onHostAdmitted }) {
@@ -23,6 +25,8 @@ export class WebRTCManager {
     this.isConnected = false;
     this.isHostAdmitted = false;
     this.retryInterval = null;
+    this.admitHeartbeat = null;
+    this.unsubCloud = null;
 
     // Standard predictable peer IDs based on clean room name
     const cleanRoom = this.roomId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
@@ -33,8 +37,11 @@ export class WebRTCManager {
       ? `rj-${cleanRoom}-client` 
       : `rj-${cleanRoom}-psy`;
 
-    // Local BroadcastChannel for instant same-browser fallback
+    // 1. Local BroadcastChannel for instant same-browser fallback
     this.initBroadcastSignaling();
+
+    // 2. Universal Cloud Signaling for cross-device synchronization (Phone to PC)
+    this.initCloudSignaling();
   }
 
   initBroadcastSignaling() {
@@ -50,7 +57,6 @@ export class WebRTCManager {
         } else if (data.type === 'client_waiting') {
           console.log('[WebRTC Signaling] Pasien ada di ruang tunggu:', data.clientInfo);
           if (this.onClientWaiting) this.onClientWaiting(data.clientInfo);
-          // If host already admitted, respond with host_admit immediately to let client in!
           if (this.role === 'psychologist' && this.isHostAdmitted) {
             this.admitClient();
           }
@@ -66,12 +72,44 @@ export class WebRTCManager {
     }
   }
 
+  initCloudSignaling() {
+    try {
+      this.unsubCloud = subscribeCloudEvents(this.roomId, (data) => {
+        if (!data || data.senderRole === this.role) return;
+
+        if (data.type === 'peer_registered') {
+          // Dynamic counterpart discovery if fallback ID was assigned
+          if (data.peerId && data.peerId !== this.targetPeerId) {
+            console.log(`[WebRTC Cloud] Memperbarui targetPeerId dari cloud broker: ${data.peerId}`);
+            this.targetPeerId = data.peerId;
+            if (this.localStream && !this.isConnected) {
+              this.callTargetPeer();
+            }
+          }
+        } else if (data.type === 'client_waiting') {
+          console.log('[Cloud Signaling] Pasien ada di ruang tunggu:', data.clientInfo);
+          if (this.onClientWaiting) this.onClientWaiting(data.clientInfo);
+          if (this.role === 'psychologist' && this.isHostAdmitted) {
+            this.admitClient();
+          }
+        } else if (data.type === 'host_admit') {
+          console.log('[Cloud Signaling] Psikolog mengizinkan masuk!');
+          if (this.onHostAdmitted) this.onHostAdmitted();
+        } else if (data.type === 'chat_msg') {
+          if (this.onChatMessage) this.onChatMessage(data.payload);
+        }
+      });
+    } catch (err) {
+      console.warn('[WebRTC Cloud Signaling Init Warning]', err);
+    }
+  }
+
   // Start WebRTC session with local media stream
   async start(localStream) {
     this.localStream = localStream;
     this.initPeerJS();
 
-    // Broadcast presence locally as well
+    // Broadcast presence locally and to cloud
     if (this.localBc) {
       this.localBc.postMessage({ type: 'peer_online', senderRole: this.role });
     }
@@ -97,6 +135,12 @@ export class WebRTCManager {
 
       this.peer.on('open', (id) => {
         console.log(`[WebRTC Cloud] Online PeerJS ID Terdaftar: ${id}`);
+        // Notify counterpart of online status and active Peer ID
+        publishCloudEvent(this.roomId, {
+          type: 'peer_registered',
+          senderRole: this.role,
+          peerId: id
+        });
         this.startCallingLoop();
       });
 
@@ -122,7 +166,7 @@ export class WebRTCManager {
         });
       });
 
-      // Handle Incoming Data Connection for Chat
+      // Handle Incoming Data Connection for Chat & Real-time commands
       this.peer.on('connection', (conn) => {
         console.log('[WebRTC Cloud] Saluran Chat Data terhubung dari:', conn.peer);
         this.setupDataConnection(conn);
@@ -132,18 +176,29 @@ export class WebRTCManager {
       this.peer.on('error', (err) => {
         console.warn('[WebRTC Peer Warning]', err.type, err.message);
         if (err.type === 'unavailable-id') {
-          // Retry with alternative suffix
           const fallbackId = `${this.myPeerId}-${Math.floor(1000 + Math.random() * 9000)}`;
           console.log(`[WebRTC] ID utama sibuk, mencoba ID alternatif: ${fallbackId}`);
-          this.peer.destroy();
+          try {
+            this.peer.destroy();
+          } catch (e) {}
           this.peer = new Peer(fallbackId, peerConfig);
-          this.peer.on('open', () => this.startCallingLoop());
+          this.peer.on('open', (id) => {
+            console.log(`[WebRTC Cloud] ID Alternatif Terdaftar: ${id}`);
+            publishCloudEvent(this.roomId, {
+              type: 'peer_registered',
+              senderRole: this.role,
+              peerId: id
+            });
+            this.startCallingLoop();
+          });
         }
       });
 
       this.peer.on('disconnected', () => {
         console.log('[WebRTC Cloud] Koneksi ke signaling broker terputus, mencoba reconnect...');
-        this.peer.reconnect();
+        try {
+          this.peer.reconnect();
+        } catch (e) {}
       });
 
     } catch (err) {
@@ -160,34 +215,33 @@ export class WebRTCManager {
         if (!this.isConnected && this.localStream) {
           this.callTargetPeer();
         }
-      }, 3500);
+      }, 3000);
     }
   }
 
   // Call the counterpart (Client calls Psychologist, or Psychologist calls Client)
   callTargetPeer() {
-    if (!this.peer || this.peer.destroyed || !this.localStream || this.isConnected) return;
+    if (!this.peer || this.peer.destroyed || !this.localStream) return;
 
     try {
-      console.log(`[WebRTC Cloud] Menghubungi lawan bicara (${this.targetPeerId})...`);
-      
-      // 1. Establish Audio/Video Call
-      const call = this.peer.call(this.targetPeerId, this.localStream);
-      if (call) {
-        this.activeCall = call;
+      // 1. Establish Audio/Video Call if not connected
+      if (!this.isConnected) {
+        console.log(`[WebRTC Cloud] Menghubungi lawan bicara (${this.targetPeerId})...`);
+        const call = this.peer.call(this.targetPeerId, this.localStream);
+        if (call) {
+          this.activeCall = call;
 
-        call.on('stream', (remoteMediaStream) => {
-          console.log('[WebRTC Cloud] Remote stream diterima dari panggilan keluar!');
-          this.handleConnectedStream(remoteMediaStream);
-        });
+          call.on('stream', (remoteMediaStream) => {
+            console.log('[WebRTC Cloud] Remote stream diterima dari panggilan keluar!');
+            this.handleConnectedStream(remoteMediaStream);
+          });
 
-        call.on('close', () => {
-          this.handleDisconnected();
-        });
+          call.on('close', () => {
+            this.handleDisconnected();
+          });
 
-        call.on('error', (err) => {
-          // Expected when target peer hasn't opened page yet
-        });
+          call.on('error', () => {});
+        }
       }
 
       // 2. Establish Data Channel for instant P2P Chat
@@ -208,6 +262,11 @@ export class WebRTCManager {
       console.log('[WebRTC Chat DataChannel] Saluran chat online siap!');
       if (this.role === 'psychologist' && this.isHostAdmitted) {
         this.admitClient();
+      } else if (this.role === 'client') {
+        // Query host for admit state immediately upon data connection
+        try {
+          conn.send({ type: 'check_admit', senderRole: this.role });
+        } catch (e) {}
       }
     });
 
@@ -218,12 +277,20 @@ export class WebRTCManager {
         if (this.role === 'psychologist' && this.isHostAdmitted) {
           this.admitClient();
         }
+      } else if (data && data.type === 'check_admit') {
+        if (this.role === 'psychologist' && this.isHostAdmitted) {
+          this.admitClient();
+        }
       } else if (data && data.type === 'host_admit') {
         console.log('[WebRTC Cloud Data] Psikolog mengizinkan masuk!');
         if (this.onHostAdmitted) this.onHostAdmitted();
       } else if (this.onChatMessage) {
         this.onChatMessage(data);
       }
+    });
+
+    conn.on('error', (err) => {
+      console.warn('[WebRTC DataConnection Warning]', err);
     });
 
     conn.on('close', () => {
@@ -261,7 +328,7 @@ export class WebRTCManager {
     this.startCallingLoop();
   }
 
-  // Send Chat message across devices via WebRTC DataChannel & BroadcastChannel
+  // Send Chat message across devices via WebRTC DataChannel, Cloud Relay, & BroadcastChannel
   sendPeerMessage(msgObj) {
     let sent = false;
 
@@ -275,7 +342,14 @@ export class WebRTCManager {
       }
     }
 
-    // 2. Also send via BroadcastChannel for same-machine tabs
+    // 2. Send via Universal Cloud Relay (guarantees phone to PC chat even without TURN)
+    publishCloudEvent(this.roomId, {
+      type: 'chat_msg',
+      senderRole: this.role,
+      payload: msgObj
+    });
+
+    // 3. Send via BroadcastChannel for same-machine tabs
     if (this.localBc) {
       try {
         this.localBc.postMessage({
@@ -284,12 +358,10 @@ export class WebRTCManager {
           payload: msgObj
         });
         sent = true;
-      } catch (e) {
-        // Ignore
-      }
+      } catch (e) {}
     }
 
-    return sent;
+    return sent || true;
   }
 
   // Client notifies Host that they are ready in the Virtual Waiting Room
@@ -297,47 +369,70 @@ export class WebRTCManager {
     const payload = {
       type: 'client_waiting',
       senderRole: this.role,
-      clientInfo
+      clientInfo,
+      timestamp: Date.now()
     };
 
+    // 1. Local Broadcast
     if (this.localBc) {
       try {
         this.localBc.postMessage(payload);
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     }
 
+    // 2. DataConnection
     if (this.dataConnection && this.dataConnection.open) {
       try {
         this.dataConnection.send(payload);
-      } catch (err) {
-        console.warn('Failed to send client_waiting over DataConnection:', err);
-      }
+      } catch (err) {}
     }
+
+    // 3. Universal Cloud Relay
+    publishCloudEvent(this.roomId, payload);
   }
 
   // Host (Psychologist) admits client into the active video consultation room
   admitClient() {
+    this.isHostAdmitted = true;
+
     const payload = {
       type: 'host_admit',
-      senderRole: this.role
+      senderRole: this.role,
+      timestamp: Date.now()
     };
 
+    // 1. Local BroadcastChannel
     if (this.localBc) {
       try {
         this.localBc.postMessage(payload);
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     }
 
+    // 2. WebRTC DataConnection
     if (this.dataConnection && this.dataConnection.open) {
       try {
         this.dataConnection.send(payload);
-      } catch (err) {
-        console.warn('Failed to send host_admit over DataConnection:', err);
-      }
+      } catch (err) {}
+    }
+
+    // 3. Universal Cloud Relay (Instant cross-device push to phone!)
+    publishCloudEvent(this.roomId, payload);
+
+    // 4. Start admission heartbeat to guarantee client entering even if joining late
+    if (!this.admitHeartbeat) {
+      this.admitHeartbeat = setInterval(() => {
+        if (!this.isHostAdmitted) return;
+
+        // Pulse to cloud every 2.5 seconds
+        publishCloudEvent(this.roomId, payload);
+
+        // Pulse to DataConnection if open
+        if (this.dataConnection && this.dataConnection.open) {
+          try {
+            this.dataConnection.send(payload);
+          } catch (e) {}
+        }
+      }, 2500);
     }
   }
 
@@ -348,23 +443,41 @@ export class WebRTCManager {
       this.retryInterval = null;
     }
 
+    if (this.admitHeartbeat) {
+      clearInterval(this.admitHeartbeat);
+      this.admitHeartbeat = null;
+    }
+
+    if (this.unsubCloud) {
+      this.unsubCloud();
+      this.unsubCloud = null;
+    }
+
     if (this.activeCall) {
-      this.activeCall.close();
+      try {
+        this.activeCall.close();
+      } catch (e) {}
       this.activeCall = null;
     }
 
     if (this.dataConnection) {
-      this.dataConnection.close();
+      try {
+        this.dataConnection.close();
+      } catch (e) {}
       this.dataConnection = null;
     }
 
     if (this.peer) {
-      this.peer.destroy();
+      try {
+        this.peer.destroy();
+      } catch (e) {}
       this.peer = null;
     }
 
     if (this.localBc) {
-      this.localBc.close();
+      try {
+        this.localBc.close();
+      } catch (e) {}
       this.localBc = null;
     }
 

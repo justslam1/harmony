@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WebRTCManager } from '../services/webrtcManager';
+import { publishCloudEvent, subscribeCloudEvents } from '../services/cloudSignaling';
 
 export default function ConsultationRoom({ psychologist, currentUser, onLeaveSession }) {
   // Determine Role & Room ID for WebRTC Peer-to-Peer
@@ -16,6 +17,18 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   // - Psychologists always enter 'in_session' directly (Host Mode)
   // - Clients start in 'waiting_room' until admitted by host
   const [sessionStage, setSessionStage] = useState(defaultRole === 'psychologist' ? 'in_session' : 'waiting_room');
+  
+  // Track whether the Psychologist Host has actively started the consultation session
+  const [isSessionStartedByHost, setIsSessionStartedByHost] = useState(() => {
+    if (defaultRole !== 'psychologist') return false;
+    try {
+      return localStorage.getItem(`ruangjiwa_room_${roomId}_stage`) === 'in_session';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const [hostAdmitDetected, setHostAdmitDetected] = useState(false);
   const [isClientWaiting, setIsClientWaiting] = useState(false);
   const [waitingClientInfo, setWaitingClientInfo] = useState(null);
   const [hostAlert, setHostAlert] = useState('');
@@ -36,34 +49,61 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     }
   }, [currentRole, sessionStage]);
 
-  // Synchronize client sessionStage if host has admitted the room (via localStorage / storage event)
+  // Synchronize client sessionStage if host has admitted the room (Cloud, WebRTC, LocalStorage)
   useEffect(() => {
     if (currentRole !== 'client') return;
 
-    const checkAdmission = () => {
-      try {
-        const stage = localStorage.getItem(`ruangjiwa_room_${roomId}_stage`);
-        if (stage === 'in_session' && sessionStage === 'waiting_room') {
-          console.log('[Client] Psikolog telah membuka sesi! Masuk ke ruang konseling...');
-          setSessionStage('in_session');
-        }
-      } catch (e) {}
+    const handleAdmit = () => {
+      console.log('[Client] Host admit detected! Membuka ruang tatap muka konseling...');
+      setHostAdmitDetected(true);
+      setTimeout(() => {
+        setSessionStage('in_session');
+      }, 300);
     };
 
-    // Check immediately on mount or role change
-    checkAdmission();
+    // 1. Check LocalStorage (for same-device/browser testing)
+    try {
+      const stage = localStorage.getItem(`ruangjiwa_room_${roomId}_stage`);
+      if (stage === 'in_session') {
+        handleAdmit();
+      }
+    } catch (e) {}
 
-    // Listen to storage event (triggers when psychologist in another tab sets the key)
-    window.addEventListener('storage', checkAdmission);
+    // 2. Storage event listener (triggers when host opens in another local tab)
+    const onStorage = (e) => {
+      if (e.key === `ruangjiwa_room_${roomId}_stage` && e.newValue === 'in_session') {
+        handleAdmit();
+      }
+    };
+    window.addEventListener('storage', onStorage);
 
-    // Fast poll while in waiting room
-    const pollInterval = setInterval(checkAdmission, 800);
+    // 3. Universal Cross-Device Cloud Signaling (Instant push via SSE & HTTP Poll across phone & PC)
+    const unsubCloud = subscribeCloudEvents(roomId, (data) => {
+      if (data && (data.type === 'host_admit' || data.stage === 'in_session')) {
+        handleAdmit();
+      }
+    });
 
     return () => {
-      window.removeEventListener('storage', checkAdmission);
-      clearInterval(pollInterval);
+      window.removeEventListener('storage', onStorage);
+      unsubCloud();
     };
-  }, [currentRole, roomId, sessionStage]);
+  }, [currentRole, roomId]);
+
+  // Host recurring heartbeat to broadcast active session to cloud
+  useEffect(() => {
+    if (currentRole !== 'psychologist' || !isSessionStartedByHost) return;
+
+    const interval = setInterval(() => {
+      publishCloudEvent(roomId, {
+        type: 'host_admit',
+        senderRole: 'psychologist',
+        stage: 'in_session'
+      });
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [currentRole, isSessionStartedByHost, roomId]);
 
   // Media States
   const [isMuted, setIsMuted] = useState(false);
@@ -158,10 +198,10 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
 
   // Live Session Active State:
   // - For client: sessionStage === 'in_session'
-  // - For psychologist: remoteStream is connected OR isSimulatedPeerActive is true
+  // - For psychologist: isSessionStartedByHost is true OR isSimulatedPeerActive is true
   const isLiveSessionActive = currentRole === 'client'
     ? sessionStage === 'in_session'
-    : Boolean(remoteStream || isSimulatedPeerActive);
+    : Boolean(isSessionStartedByHost || isSimulatedPeerActive);
 
   // Countdown Timer Effect: ONLY starts ticking when live consultation is actually underway!
   useEffect(() => {
@@ -237,7 +277,8 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
               setHostAlert(`🔔 Pasien ${clientInfo?.name || 'Klien Ruang Jiwa'} telah masuk ke Ruang Tunggu.`);
             },
             onHostAdmitted: () => {
-              console.log('[Client] Psikolog mengizinkan masuk!');
+              console.log('[Client WebRTC] Psikolog mengizinkan masuk!');
+              setHostAdmitDetected(true);
               setSessionStage('in_session');
             }
           });
@@ -298,11 +339,19 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
 
   // Host (Psychologist) admits client into session
   const handleAdmitClient = () => {
+    setIsSessionStartedByHost(true);
+    setIsClientWaiting(false);
+    setIsSimulatedPeerActive(true);
+
     if (webrtcManagerRef.current) {
       webrtcManagerRef.current.admitClient();
     }
-    setIsClientWaiting(false);
-    setIsSimulatedPeerActive(true);
+
+    publishCloudEvent(roomId, {
+      type: 'host_admit',
+      senderRole: 'psychologist',
+      stage: 'in_session'
+    });
 
     try {
       localStorage.setItem(`ruangjiwa_room_${roomId}_stage`, 'in_session');
@@ -314,11 +363,19 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
 
   // Directly start session with patient (either admits waiting client or starts simulated active session)
   const handleStartSession = () => {
+    setIsSessionStartedByHost(true);
+    setIsClientWaiting(false);
+    setIsSimulatedPeerActive(true);
+
     if (webrtcManagerRef.current) {
       webrtcManagerRef.current.admitClient();
     }
-    setIsClientWaiting(false);
-    setIsSimulatedPeerActive(true);
+
+    publishCloudEvent(roomId, {
+      type: 'host_admit',
+      senderRole: 'psychologist',
+      stage: 'in_session'
+    });
 
     try {
       localStorage.setItem(`ruangjiwa_room_${roomId}_stage`, 'in_session');
@@ -640,18 +697,49 @@ Layanan Bantuan WhatsApp: 0811-8777-078
             <div className="md:col-span-6 space-y-4">
               
               {/* Admission Notice Card */}
-              <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-4 space-y-2">
-                <div className="flex items-center gap-2 text-sky-950 font-extrabold text-sm">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
-                  <span>Psikolog Sedang Meninjau Asesmen</span>
+              <div className={`rounded-2xl p-4 space-y-2.5 transition-all ${
+                (hostAdmitDetected || remoteStream)
+                  ? 'bg-emerald-50 border-2 border-emerald-400 shadow-md animate-fadeIn'
+                  : 'bg-sky-50/80 border border-sky-200'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-extrabold text-sm">
+                    <span className={`w-2.5 h-2.5 rounded-full ${
+                      (hostAdmitDetected || remoteStream) ? 'bg-emerald-500 animate-ping' : 'bg-amber-500 animate-ping'
+                    }`}></span>
+                    <span className={(hostAdmitDetected || remoteStream) ? 'text-emerald-950 font-black' : 'text-sky-950'}>
+                      {(hostAdmitDetected || remoteStream)
+                        ? '🎉 Psikolog Telah Membuka Sesi Tatap Muka!'
+                        : 'Psikolog Sedang Meninjau Asesmen'}
+                    </span>
+                  </div>
+                  {(hostAdmitDetected || remoteStream) && (
+                    <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">
+                      Sesi Aktif
+                    </span>
+                  )}
                 </div>
+
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Psikolog {psychologist?.name?.split(',')[0] || 'Cliff'} telah menerima notifikasi kedatangan Anda di ruang tunggu dan akan segera membuka pintu ruang telekonseling.
+                  {(hostAdmitDetected || remoteStream)
+                    ? `Psikolog ${psychologist?.name?.split(',')[0] || 'Cliff'} siap menyambut Anda di ruang telekonseling. Anda sedang dihubungkan ke sesi tatap muka...`
+                    : `Psikolog ${psychologist?.name?.split(',')[0] || 'Cliff'} telah menerima notifikasi kedatangan Anda di ruang tunggu dan akan segera membuka pintu ruang telekonseling.`}
                 </p>
-                <div className="bg-white p-2.5 rounded-xl border border-sky-100 flex items-center gap-2 text-xs font-bold text-sky-900">
-                  <span>⏱️</span>
-                  <span>Timer 60 menit Anda BELUM berjalan. Waktu sesi baru dihitung saat tatap muka dimulai.</span>
-                </div>
+
+                {(hostAdmitDetected || remoteStream) ? (
+                  <button
+                    onClick={() => setSessionStage('in_session')}
+                    className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-black py-3 px-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all cursor-pointer flex items-center justify-center gap-2 animate-bounce"
+                  >
+                    <span>▶️</span>
+                    <span>Masuk ke Ruang Sesi Sekarang</span>
+                  </button>
+                ) : (
+                  <div className="bg-white p-2.5 rounded-xl border border-sky-100 flex items-center gap-2 text-xs font-bold text-sky-900">
+                    <span>⏱️</span>
+                    <span>Timer 60 menit Anda BELUM berjalan. Waktu sesi baru dihitung saat tatap muka dimulai.</span>
+                  </div>
+                )}
               </div>
 
               {/* Calming Mindfulness Breathing Exercise */}
@@ -701,23 +789,27 @@ Layanan Bantuan WhatsApp: 0811-8777-078
     <section className="my-6 max-w-7xl mx-auto px-4 animate-fadeIn">
 
       {/* Host Admission Alert Banner (For Psychologist when patient arrives) */}
-      {isClientWaiting && isPsychologistHost && (
+      {isPsychologistHost && !isLiveSessionActive && (isClientWaiting || remoteStream) && (
         <div className="mb-4 p-4 rounded-3xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 animate-fadeIn">
           <div className="flex items-center gap-3.5">
             <span className="text-3xl animate-bounce">🔔</span>
             <div>
-              <h4 className="text-sm font-extrabold text-amber-950">Pasien Telah Tiba di Ruang Tunggu!</h4>
+              <h4 className="text-sm font-extrabold text-amber-950">
+                {remoteStream ? 'Pasien Telah Terhubung dari Ruang Tunggu!' : 'Pasien Telah Tiba di Ruang Tunggu!'}
+              </h4>
               <p className="text-xs text-amber-800">
-                {waitingClientInfo?.name || patientInfo.name} sedang bersiap di lobby virtual. Klik untuk membuka sesi konsultasi.
+                {remoteStream
+                  ? `Kamera & mikrofon pasien (${waitingClientInfo?.name || patientInfo.name}) telah aktif di ruang tunggu. Klik tombol untuk mulai tatap muka.`
+                  : `Pasien ${waitingClientInfo?.name || patientInfo.name} sedang berada di Ruang Tunggu Privat dan siap untuk sesi konseling.`}
               </p>
             </div>
           </div>
           <button
-            onClick={handleAdmitClient}
-            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm px-6 py-3 rounded-2xl shadow-md transition-all cursor-pointer hover:scale-105 flex items-center justify-center gap-2"
+            onClick={handleStartSession}
+            className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs sm:text-sm px-6 py-3 rounded-2xl shadow-md transition-all cursor-pointer hover:scale-105 flex items-center justify-center gap-2"
           >
-            <span>🚪</span>
-            <span>Izinkan Pasien Masuk (Admit to Session)</span>
+            <span>▶️</span>
+            <span>Izinkan Masuk & Mulai Sesi Tatap Muka</span>
           </button>
         </div>
       )}
@@ -784,14 +876,14 @@ Layanan Bantuan WhatsApp: 0811-8777-078
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {/* Main Action to Start Session for Psychologist */}
-          {isPsychologistHost && !remoteStream && !isSimulatedPeerActive && (
+          {isPsychologistHost && !isLiveSessionActive && (
             <button
               onClick={handleStartSession}
               className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2 rounded-2xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md hover:scale-105 animate-pulse"
               title="Mulai sesi konseling langsung dengan pasien"
             >
               <span>▶️</span>
-              <span>Mulai Sesi</span>
+              <span>{remoteStream ? 'Mulai Sesi Bersama Pasien' : 'Mulai Sesi'}</span>
             </button>
           )}
 
@@ -841,40 +933,52 @@ Layanan Bantuan WhatsApp: 0811-8777-078
           <div className="relative w-full h-[450px] sm:h-[530px] bg-[#0c2a38] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 flex items-center justify-center group">
             
             {/* Main Video View: WebRTC Remote Stream OR Simulated Patient OR Host/Client Standby Screen */}
-            {remoteStream ? (
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover"
-              />
-            ) : isSimulatedPeerActive ? (
-              /* ACTIVE PATIENT LIVE VIDEO (Simulated or Direct Started) */
-              <div className="relative w-full h-full bg-[#071720] flex items-center justify-center overflow-hidden">
-                <img
-                  src="/assets/indonesian_counseling_hero.jpg"
-                  alt={patientInfo.name}
-                  className="w-full h-full object-cover opacity-90 scale-105 filter brightness-95"
+            {isLiveSessionActive ? (
+              remoteStream ? (
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/30 pointer-events-none"></div>
+              ) : isSimulatedPeerActive ? (
+                /* ACTIVE PATIENT LIVE VIDEO (Simulated or Direct Started) */
+                <div className="relative w-full h-full bg-[#071720] flex items-center justify-center overflow-hidden">
+                  <img
+                    src="/assets/indonesian_counseling_hero.jpg"
+                    alt={patientInfo.name}
+                    className="w-full h-full object-cover opacity-90 scale-105 filter brightness-95"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/30 pointer-events-none"></div>
 
-                {/* Patient presence indicator */}
-                <div className="absolute bottom-20 left-4 flex items-center gap-2 bg-slate-900/85 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-white/20 text-white text-xs shadow-lg">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span className="font-extrabold">{patientInfo.name} (Pasien)</span>
-                  <span className="text-[10px] text-emerald-300 font-semibold bg-emerald-950/70 border border-emerald-500/40 px-2 py-0.5 rounded-md">
-                    🎙️ Audio & Video Aktif
-                  </span>
+                  {/* Patient presence indicator */}
+                  <div className="absolute bottom-20 left-4 flex items-center gap-2 bg-slate-900/85 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-white/20 text-white text-xs shadow-lg">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-extrabold">{patientInfo.name} (Pasien)</span>
+                    <span className="text-[10px] text-emerald-300 font-semibold bg-emerald-950/70 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                      🎙️ Audio & Video Aktif
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setIsSimulatedPeerActive(false);
+                      setIsSessionStartedByHost(false);
+                    }}
+                    className="absolute top-4 left-56 bg-slate-900/80 hover:bg-slate-900 text-slate-300 hover:text-white text-[11px] font-bold px-3 py-1.5 rounded-xl border border-white/20 transition-all cursor-pointer shadow-sm"
+                    title="Kembali ke layar siaga menunggu pasien"
+                  >
+                    ← Jeda / Layar Siaga
+                  </button>
                 </div>
-
-                <button
-                  onClick={() => setIsSimulatedPeerActive(false)}
-                  className="absolute top-4 left-56 bg-slate-900/80 hover:bg-slate-900 text-slate-300 hover:text-white text-[11px] font-bold px-3 py-1.5 rounded-xl border border-white/20 transition-all cursor-pointer shadow-sm"
-                  title="Kembali ke layar siaga menunggu pasien"
-                >
-                  ← Jeda / Layar Siaga
-                </button>
-              </div>
+              ) : (
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+              )
             ) : isPsychologistHost ? (
               /* PSYCHOLOGIST HOST STANDBY SCREEN */
               <div className="w-full h-full bg-gradient-to-b from-[#0e2c3b] to-[#081922] flex flex-col items-center justify-center p-6 text-center text-white space-y-4 relative">
@@ -893,12 +997,16 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                     Ruang Telekonseling Siaga (Host Aktif)
                   </span>
                   <h4 className="text-lg sm:text-xl font-black text-white pt-1">
-                    {isClientWaiting ? 'Pasien Sudah Tiba di Lobi Virtual!' : 'Siap Memulai Sesi Konseling'}
+                    {remoteStream
+                      ? 'Pasien Sudah Terhubung & Siap!'
+                      : (isClientWaiting ? 'Pasien Sudah Tiba di Lobi Virtual!' : 'Siap Memulai Sesi Konseling')}
                   </h4>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    {isClientWaiting
-                      ? `Pasien ${waitingClientInfo?.name || patientInfo.name} sedang menunggu di lobi. Klik tombol di bawah untuk membuka sesi tatap muka.`
-                      : 'Kamera dan audio Anda siap. Klik tombol "Mulai Sesi Sekarang" untuk tatap muka langsung, atau bagikan link ke pasien.'}
+                    {remoteStream
+                      ? `Kamera dan mikrofon pasien (${waitingClientInfo?.name || patientInfo.name}) telah aktif di Ruang Tunggu. Klik tombol di bawah untuk membuka sesi tatap muka.`
+                      : (isClientWaiting
+                        ? `Pasien ${waitingClientInfo?.name || patientInfo.name} sedang menunggu di lobi. Klik tombol di bawah untuk membuka sesi tatap muka.`
+                        : 'Kamera dan audio Anda siap. Klik tombol "Mulai Sesi Sekarang" untuk tatap muka langsung, atau bagikan link ke pasien.')}
                   </p>
                 </div>
 
@@ -909,7 +1017,7 @@ Layanan Bantuan WhatsApp: 0811-8777-078
                     className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-extrabold text-sm py-3.5 px-6 rounded-2xl shadow-xl shadow-emerald-900/50 transition-all cursor-pointer hover:scale-105 flex items-center justify-center gap-2 border border-emerald-400/40 animate-pulse"
                   >
                     <span className="text-lg">▶️</span>
-                    <span>{isClientWaiting ? 'Izinkan Pasien Masuk & Mulai Sesi' : 'Mulai Sesi Konseling Sekarang'}</span>
+                    <span>{remoteStream || isClientWaiting ? 'Izinkan Pasien Masuk & Mulai Sesi' : 'Mulai Sesi Konseling Sekarang'}</span>
                   </button>
 
                   <button
