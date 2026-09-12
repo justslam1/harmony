@@ -7,6 +7,13 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   const currentRole = urlParams.get('role') || (currentUser?.role === 'psychologist' ? 'psychologist' : 'client');
   const roomId = urlParams.get('room') || 'RJ-8821940';
 
+  // Professional Flow: 'waiting_room' (Client before admission) | 'in_session' (Active Telehealth)
+  const [sessionStage, setSessionStage] = useState(currentRole === 'psychologist' ? 'in_session' : 'waiting_room');
+  const [isClientWaiting, setIsClientWaiting] = useState(false);
+  const [waitingClientInfo, setWaitingClientInfo] = useState(null);
+  const [hostAlert, setHostAlert] = useState('');
+  const [mindfulnessPhase, setMindfulnessPhase] = useState('inhale'); // 'inhale' | 'hold' | 'exhale'
+
   // Media States
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -24,7 +31,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   // Active Tab: 'chat' | 'worksheet'
   const [activeSideTab, setActiveSideTab] = useState('chat');
 
-  // Timer: 60 minutes countdown (3600 seconds)
+  // Timer: 60 minutes countdown (3600 seconds) - ONLY counts when in_session!
   const [timeLeft, setTimeLeft] = useState(3600);
 
   // Chat Messages
@@ -62,8 +69,23 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
   const localStreamRef = useRef(null);
   const chatBottomRef = useRef(null);
 
-  // Countdown Timer Effect
+  // Mindfulness Breathing animation loop for Waiting Room
   useEffect(() => {
+    if (sessionStage !== 'waiting_room') return;
+    const interval = setInterval(() => {
+      setMindfulnessPhase((prev) => {
+        if (prev === 'inhale') return 'hold';
+        if (prev === 'hold') return 'exhale';
+        return 'inhale';
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [sessionStage]);
+
+  // Countdown Timer Effect: Only starts ticking once in_session!
+  useEffect(() => {
+    if (sessionStage !== 'in_session') return;
+
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -74,7 +96,7 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [sessionStage]);
 
   // Format seconds to MM:SS
   const formatTime = (seconds) => {
@@ -126,11 +148,31 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
             },
             onChatMessage: (incomingMsg) => {
               setChatMessages((prev) => [...prev, incomingMsg]);
+            },
+            onClientWaiting: (clientInfo) => {
+              console.log('[Host] Pasien menunggu di ruang tunggu:', clientInfo);
+              setIsClientWaiting(true);
+              setWaitingClientInfo(clientInfo);
+              setHostAlert(`🔔 Pasien ${clientInfo?.name || 'Klien Ruang Jiwa'} telah masuk ke Ruang Tunggu.`);
+            },
+            onHostAdmitted: () => {
+              console.log('[Client] Psikolog mengizinkan masuk!');
+              setSessionStage('in_session');
             }
           });
 
           webrtcManagerRef.current = rtc;
           await rtc.start(stream);
+
+          // If client, notify psychologist host of arrival
+          if (currentRole === 'client') {
+            setTimeout(() => {
+              rtc.notifyClientWaiting({
+                name: currentUser?.name || 'Klien Ruang Jiwa',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              });
+            }, 1200);
+          }
         }
       } catch (err) {
         console.warn('Webcam tidak dapat diakses atau izin ditolak:', err);
@@ -176,6 +218,16 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     navigator.clipboard.writeText(peerUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 3000);
+  };
+
+  // Host (Psychologist) admits client into session
+  const handleAdmitClient = () => {
+    if (webrtcManagerRef.current) {
+      webrtcManagerRef.current.admitClient();
+    }
+    setIsClientWaiting(false);
+    setHostAlert('✓ Pasien telah diizinkan masuk! Sesi konseling & timer 60 menit resmi dimulai.');
+    setTimeout(() => setHostAlert(''), 4000);
   };
 
   // Scroll chat to bottom
@@ -323,8 +375,223 @@ Layanan Bantuan WhatsApp: 0811-8777-078
     URL.revokeObjectURL(url);
   };
 
+  // ============================================================
+  // STAGE 1: VIRTUAL WAITING ROOM (CLIENT LOBBY)
+  // ============================================================
+  if (sessionStage === 'waiting_room') {
+    return (
+      <section className="my-6 max-w-5xl mx-auto px-4 animate-fadeIn">
+        {/* Waiting Room Header Card */}
+        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-sky-100 shadow-xl mb-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shadow-xs">
+                🛋️
+              </div>
+              <div>
+                <span className="text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 px-3 py-0.5 rounded-full uppercase tracking-wider">
+                  Ruang Tunggu Privat (Lobby Konseling)
+                </span>
+                <h2 className="text-xl sm:text-2xl font-black text-[#0c2a38] mt-1">
+                  Menunggu Sesi Dimulai bersama {psychologist?.name || 'Cliff Tedyanto, M.Psi., Psikolog'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">ID Sesi: {roomId} • Terenkripsi Medis 256-Bit</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyRoomLink}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+              >
+                {copiedLink ? '✓ Tautan Disalin' : '📋 Salin Tautan'}
+              </button>
+              <button
+                onClick={onLeaveSession}
+                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+              >
+                Keluar
+              </button>
+            </div>
+          </div>
+
+          {/* Waiting Room Body: 2 Columns */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pt-6 items-center">
+            
+            {/* Left 6 cols: Hardware Self-Test (Camera & Mic) */}
+            <div className="md:col-span-6 space-y-4">
+              <div className="relative w-full h-64 sm:h-72 bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-inner flex items-center justify-center">
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover transform -scale-x-100 ${
+                    isVideoOff || !cameraActive ? 'hidden' : 'block'
+                  }`}
+                />
+
+                {(isVideoOff || !cameraActive) && (
+                  <div className="flex flex-col items-center justify-center text-slate-300 p-4 text-center">
+                    <div className="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center text-2xl mb-2">
+                      👤
+                    </div>
+                    <span className="text-xs font-bold">Kamera Anda Belum Aktif</span>
+                    <span className="text-[10px] text-slate-400 mt-1">Pastikan izin kamera di browser diizinkan</span>
+                  </div>
+                )}
+
+                {/* Self-check Badge */}
+                <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur-md px-3 py-1 rounded-xl text-white text-[11px] font-bold border border-white/20">
+                  Uji Kamera & Audio Anda
+                </div>
+
+                {/* Hardware Toggle buttons */}
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/20">
+                  <button
+                    onClick={toggleMute}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-pointer transition-all ${
+                      isMuted ? 'bg-rose-600 text-white' : 'bg-slate-700 text-white hover:bg-slate-600'
+                    }`}
+                    title={isMuted ? 'Unmute Mic' : 'Mute Mic'}
+                  >
+                    {isMuted ? '🔇' : '🎙️'}
+                  </button>
+                  <button
+                    onClick={toggleVideo}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-pointer transition-all ${
+                      isVideoOff ? 'bg-rose-600 text-white' : 'bg-slate-700 text-white hover:bg-slate-600'
+                    }`}
+                    title={isVideoOff ? 'Nyalakan Kamera' : 'Matikan Kamera'}
+                  >
+                    {isVideoOff ? '🚫' : '📹'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <span className="flex items-center gap-1.5 font-bold text-slate-700">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Mikrofon & Kamera Siap
+                </span>
+                <span className="text-[11px] font-medium text-slate-400">Enkripsi Medis Aktif</span>
+              </div>
+            </div>
+
+            {/* Right 6 cols: Mindfulness Breathing Guide & Admission Notice */}
+            <div className="md:col-span-6 space-y-4">
+              
+              {/* Admission Notice Card */}
+              <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center gap-2 text-sky-950 font-extrabold text-sm">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                  <span>Psikolog Sedang Meninjau Asesmen</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Psikolog {psychologist?.name?.split(',')[0] || 'Cliff'} telah menerima notifikasi kedatangan Anda di ruang tunggu dan akan segera membuka pintu ruang telekonseling.
+                </p>
+                <div className="bg-white p-2.5 rounded-xl border border-sky-100 flex items-center gap-2 text-xs font-bold text-sky-900">
+                  <span>⏱️</span>
+                  <span>Timer 60 menit Anda BELUM berjalan. Waktu sesi baru dihitung saat tatap muka dimulai.</span>
+                </div>
+              </div>
+
+              {/* Calming Mindfulness Breathing Exercise */}
+              <div className="bg-gradient-to-br from-teal-50/70 to-emerald-50/70 border border-teal-200/80 rounded-2xl p-5 text-center space-y-3">
+                <span className="text-[10px] font-bold text-teal-800 bg-teal-100 px-3 py-0.5 rounded-full uppercase tracking-wider">
+                  Mindfulness Pra-Konseling
+                </span>
+                <h4 className="text-sm font-black text-teal-950">
+                  Tarik Napas & Rilekskan Pikiran
+                </h4>
+
+                {/* Breathing Visual Bubble */}
+                <div className="flex flex-col items-center justify-center py-2">
+                  <div
+                    className={`w-24 h-24 rounded-full flex items-center justify-center text-white font-extrabold text-xs shadow-lg transition-all duration-1000 ${
+                      mindfulnessPhase === 'inhale'
+                        ? 'bg-gradient-to-r from-teal-500 to-sky-500 scale-115 shadow-teal-200'
+                        : mindfulnessPhase === 'hold'
+                        ? 'bg-gradient-to-r from-sky-600 to-indigo-600 scale-110 shadow-sky-200'
+                        : 'bg-gradient-to-r from-teal-600 to-emerald-600 scale-90 shadow-emerald-200'
+                    }`}
+                  >
+                    {mindfulnessPhase === 'inhale' && 'Tarik Napas'}
+                    {mindfulnessPhase === 'hold' && 'Tahan...'}
+                    {mindfulnessPhase === 'exhale' && 'Hembuskan'}
+                  </div>
+                  <span className="text-[11px] text-teal-800 font-semibold mt-2.5">
+                    {mindfulnessPhase === 'inhale' && 'Inhale perlahan melalui hidung (4 detik)'}
+                    {mindfulnessPhase === 'hold' && 'Tahan napas dengan tenang (4 detik)'}
+                    {mindfulnessPhase === 'exhale' && 'Lepaskan perlahan melalui mulut (4 detik)'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Developer / Testing Simulation Button: Allow client to enter directly if testing solo */}
+              <div className="pt-1">
+                <button
+                  onClick={() => setSessionStage('in_session')}
+                  className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 hover:border-slate-300 text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-2xs"
+                >
+                  <span>⚡</span>
+                  <span>Masuk Langsung (Simulasi Psikolog Mengizinkan)</span>
+                </button>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // ============================================================
+  // STAGE 2: ACTIVE IN-SESSION TELEHEALTH ROOM
+  // ============================================================
   return (
     <section className="my-6 max-w-7xl mx-auto px-4 animate-fadeIn">
+
+      {/* Host Admission Alert Banner (For Psychologist) */}
+      {isClientWaiting && currentRole === 'psychologist' && (
+        <div className="mb-4 p-4 rounded-3xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-3.5">
+            <span className="text-3xl animate-bounce">🔔</span>
+            <div>
+              <h4 className="text-sm font-extrabold text-amber-950">Pasien Telah Tiba di Ruang Tunggu!</h4>
+              <p className="text-xs text-amber-800">
+                {waitingClientInfo?.name || 'Klien Ruang Jiwa'} sedang bersiap di lobby virtual. Klik untuk membuka sesi konsultasi.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleAdmitClient}
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm px-6 py-3 rounded-2xl shadow-md transition-all cursor-pointer hover:scale-105 flex items-center justify-center gap-2"
+          >
+            <span>🚪</span>
+            <span>Izinkan Pasien Masuk (Admit to Session)</span>
+          </button>
+        </div>
+      )}
+
+      {/* Host Notification Alert */}
+      {hostAlert && (
+        <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fadeIn shadow-xs">
+          <span>✓</span>
+          <span>{hostAlert}</span>
+        </div>
+      )}
+
+      {/* 5-Minute Grace Period Warning */}
+      {timeLeft <= 300 && timeLeft > 0 && (
+        <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center justify-between gap-2 shadow-xs animate-fadeIn">
+          <span className="flex items-center gap-2">
+            <span>⏱️</span>
+            <span>Waktu sesi tersisa 5 menit. Silakan psikolog dan klien mulai merangkum refleksi & kesimpulan sesi.</span>
+          </span>
+        </div>
+      )}
       
       {/* Session Top Bar */}
       <div className="bg-white rounded-3xl p-4 sm:p-5 border border-sky-100 shadow-sm flex items-center justify-between gap-4 mb-5 flex-wrap">

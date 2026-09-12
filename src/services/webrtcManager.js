@@ -6,12 +6,14 @@
 import { Peer } from 'peerjs';
 
 export class WebRTCManager {
-  constructor({ roomId, role, onRemoteStream, onConnectionState, onChatMessage }) {
+  constructor({ roomId, role, onRemoteStream, onConnectionState, onChatMessage, onClientWaiting, onHostAdmitted }) {
     this.roomId = roomId || 'RJ-8821940';
     this.role = role || 'client'; // 'client' | 'psychologist'
     this.onRemoteStream = onRemoteStream;
     this.onConnectionState = onConnectionState;
     this.onChatMessage = onChatMessage;
+    this.onClientWaiting = onClientWaiting;
+    this.onHostAdmitted = onHostAdmitted;
 
     this.localStream = null;
     this.remoteStream = null;
@@ -44,6 +46,12 @@ export class WebRTCManager {
         if (data.type === 'peer_online' && this.localStream && !this.isConnected) {
           console.log('[WebRTC Hybrid] Local peer detected, initiating call to:', this.targetPeerId);
           this.callTargetPeer();
+        } else if (data.type === 'client_waiting') {
+          console.log('[WebRTC Signaling] Pasien ada di ruang tunggu:', data.clientInfo);
+          if (this.onClientWaiting) this.onClientWaiting(data.clientInfo);
+        } else if (data.type === 'host_admit') {
+          console.log('[WebRTC Signaling] Psikolog mengizinkan masuk!');
+          if (this.onHostAdmitted) this.onHostAdmitted();
         } else if (data.type === 'chat_msg') {
           if (this.onChatMessage) this.onChatMessage(data.payload);
         }
@@ -196,7 +204,13 @@ export class WebRTCManager {
     });
 
     conn.on('data', (data) => {
-      if (this.onChatMessage) {
+      if (data && data.type === 'client_waiting') {
+        console.log('[WebRTC Cloud Data] Pasien ada di ruang tunggu:', data.clientInfo);
+        if (this.onClientWaiting) this.onClientWaiting(data.clientInfo);
+      } else if (data && data.type === 'host_admit') {
+        console.log('[WebRTC Cloud Data] Psikolog mengizinkan masuk!');
+        if (this.onHostAdmitted) this.onHostAdmitted();
+      } else if (this.onChatMessage) {
         this.onChatMessage(data);
       }
     });
@@ -265,6 +279,55 @@ export class WebRTCManager {
     }
 
     return sent;
+  }
+
+  // Client notifies Host that they are ready in the Virtual Waiting Room
+  notifyClientWaiting(clientInfo = {}) {
+    const payload = {
+      type: 'client_waiting',
+      senderRole: this.role,
+      clientInfo
+    };
+
+    if (this.localBc) {
+      try {
+        this.localBc.postMessage(payload);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (this.dataConnection && this.dataConnection.open) {
+      try {
+        this.dataConnection.send(payload);
+      } catch (err) {
+        console.warn('Failed to send client_waiting over DataConnection:', err);
+      }
+    }
+  }
+
+  // Host (Psychologist) admits client into the active video consultation room
+  admitClient() {
+    const payload = {
+      type: 'host_admit',
+      senderRole: this.role
+    };
+
+    if (this.localBc) {
+      try {
+        this.localBc.postMessage(payload);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (this.dataConnection && this.dataConnection.open) {
+      try {
+        this.dataConnection.send(payload);
+      } catch (err) {
+        console.warn('Failed to send host_admit over DataConnection:', err);
+      }
+    }
   }
 
   // Close and clean up all connections
