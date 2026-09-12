@@ -21,6 +21,7 @@ export class WebRTCManager {
     this.activeCall = null;
     this.dataConnection = null;
     this.isConnected = false;
+    this.isHostAdmitted = false;
     this.retryInterval = null;
 
     // Standard predictable peer IDs based on clean room name
@@ -49,6 +50,10 @@ export class WebRTCManager {
         } else if (data.type === 'client_waiting') {
           console.log('[WebRTC Signaling] Pasien ada di ruang tunggu:', data.clientInfo);
           if (this.onClientWaiting) this.onClientWaiting(data.clientInfo);
+          // If host already admitted, respond with host_admit immediately to let client in!
+          if (this.role === 'psychologist' && this.isHostAdmitted) {
+            this.admitClient();
+          }
         } else if (data.type === 'host_admit') {
           console.log('[WebRTC Signaling] Psikolog mengizinkan masuk!');
           if (this.onHostAdmitted) this.onHostAdmitted();
@@ -201,12 +206,18 @@ export class WebRTCManager {
 
     conn.on('open', () => {
       console.log('[WebRTC Chat DataChannel] Saluran chat online siap!');
+      if (this.role === 'psychologist' && this.isHostAdmitted) {
+        this.admitClient();
+      }
     });
 
     conn.on('data', (data) => {
       if (data && data.type === 'client_waiting') {
         console.log('[WebRTC Cloud Data] Pasien ada di ruang tunggu:', data.clientInfo);
         if (this.onClientWaiting) this.onClientWaiting(data.clientInfo);
+        if (this.role === 'psychologist' && this.isHostAdmitted) {
+          this.admitClient();
+        }
       } else if (data && data.type === 'host_admit') {
         console.log('[WebRTC Cloud Data] Psikolog mengizinkan masuk!');
         if (this.onHostAdmitted) this.onHostAdmitted();

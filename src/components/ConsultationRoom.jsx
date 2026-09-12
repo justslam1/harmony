@@ -36,6 +36,35 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     }
   }, [currentRole, sessionStage]);
 
+  // Synchronize client sessionStage if host has admitted the room (via localStorage / storage event)
+  useEffect(() => {
+    if (currentRole !== 'client') return;
+
+    const checkAdmission = () => {
+      try {
+        const stage = localStorage.getItem(`ruangjiwa_room_${roomId}_stage`);
+        if (stage === 'in_session' && sessionStage === 'waiting_room') {
+          console.log('[Client] Psikolog telah membuka sesi! Masuk ke ruang konseling...');
+          setSessionStage('in_session');
+        }
+      } catch (e) {}
+    };
+
+    // Check immediately on mount or role change
+    checkAdmission();
+
+    // Listen to storage event (triggers when psychologist in another tab sets the key)
+    window.addEventListener('storage', checkAdmission);
+
+    // Fast poll while in waiting room
+    const pollInterval = setInterval(checkAdmission, 800);
+
+    return () => {
+      window.removeEventListener('storage', checkAdmission);
+      clearInterval(pollInterval);
+    };
+  }, [currentRole, roomId, sessionStage]);
+
   // Media States
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -280,18 +309,28 @@ export default function ConsultationRoom({ psychologist, currentUser, onLeaveSes
     }
     setIsClientWaiting(false);
     setIsSimulatedPeerActive(true);
+
+    try {
+      localStorage.setItem(`ruangjiwa_room_${roomId}_stage`, 'in_session');
+    } catch (e) {}
+
     setHostAlert('✓ Pasien telah diizinkan masuk! Sesi tatap muka resmi dimulai.');
     setTimeout(() => setHostAlert(''), 4000);
   };
 
   // Directly start session with patient (either admits waiting client or starts simulated active session)
   const handleStartSession = () => {
-    if (isClientWaiting && webrtcManagerRef.current) {
+    if (webrtcManagerRef.current) {
       webrtcManagerRef.current.admitClient();
-      setIsClientWaiting(false);
     }
+    setIsClientWaiting(false);
     setIsSimulatedPeerActive(true);
-    setHostAlert('✓ Sesi konseling dimulai! Mode tatap muka aktif bersama pasien.');
+
+    try {
+      localStorage.setItem(`ruangjiwa_room_${roomId}_stage`, 'in_session');
+    } catch (e) {}
+
+    setHostAlert('✓ Sesi konseling dimulai! Pintu ruang tatap muka telah dibuka untuk pasien.');
     setTimeout(() => setHostAlert(''), 4000);
   };
 
